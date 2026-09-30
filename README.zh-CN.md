@@ -33,14 +33,6 @@ python tools/octo run bundle --port 8141
 #（mail、帳號和助手均可使用）
 ```
 
-## 狀態
-
-- [x] 完整郵件 UI（收件箱、閱讀器、撰寫器、文件夾、帳號）
-- [x] AI 摘要按鈕（調用 `octos.turn.start`）
-- [ ] 截圖已截取
-- [ ] 發布者信息已填寫（`listing.json`）
-- [ ] 已簽名並提交至 App Hub
-
 ## 許可證
 
 MIT

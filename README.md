@@ -34,14 +34,6 @@ python tools/octo run bundle --port 8141
 # (mail, accounts, and the assistant all work)
 ```
 
-## Status
-
-- [x] Full mail UI (inbox, reader, composer, folders, accounts)
-- [x] AI summarization button (calls `octos.turn.start`)
-- [ ] Screenshot captured
-- [ ] Publisher identity filled in (`listing.json`)
-- [ ] Signed and submitted to App Hub
-
 ## License
 
 MIT
