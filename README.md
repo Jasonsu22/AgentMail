@@ -10,7 +10,7 @@ your password.
 
 - **Read & manage mail** — inbox, folders, compose, reply, send
 - **AI summarization** — tap Summarize on any message to get a one-sentence digest
-- **Host-owned credentials** — sign in on the device''s own sheet; passwords stay in the platform keychain
+- **Host-owned credentials** — sign in on the device's own sheet; passwords stay in the platform keychain
 - **Offline-first UI** — the assistant is optional; every screen works without it
 
 ## Structure
