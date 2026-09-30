@@ -1,0 +1,15 @@
+{
+  "capabilities": [
+    "storage",
+    "mail",
+    "octos.session.open",
+    "octos.turn.start"
+  ],
+  "id": "agent-mail",
+  "integrity": {
+    "bundle_blake3": "43884a580fb58ff4371d407ff2194de2217475632760000aa1792d5f40bb3e93"
+  },
+  "name": "Agent Mail",
+  "schema": 1,
+  "version": "0.1.0"
+}

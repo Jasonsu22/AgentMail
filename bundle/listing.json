@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "description": "A smart email app with AI-powered summarization. Read, compose, and manage your mail \u2014 the assistant helps you stay on top of your inbox.",
+  "subtitle": "Email with AI smarts",
+  "icon": "assets/icon.svg",
+  "screenshots": ["screenshots/01-main.png"],
+  "category": "productivity",
+  "platforms": ["macos"],
+  "age_rating": "all",
+  "keywords": ["mail", "email", "ai", "assistant", "summarize"],
+  "publisher": {
+    "name": "Replace with your name",
+    "support": "https://example.com/support",
+    "privacy_policy_url": "https://example.com/privacy"
+  }
+}
