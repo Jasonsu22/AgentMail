@@ -305,17 +305,17 @@ fn toggle_agent(){
     ui.agent_panel.set_visible(agent_open)
 }
 fn refresh_provider(){
-    ui.api_status.set_text("Checking…")
+    ui.api_status.set_text("Testing the connection…")
     host.request("octos.session.open", {}, fn(s){
         if !s.is_ok {
-            ui.api_status.set_text("Not connected. Add a provider in Start → Settings → AI providers.")
+            ui.api_status.set_text(s.error)
             return
         }
         if s.data == nil || s.data.model == nil {
-            ui.api_status.set_text("No provider yet. Open Start → Settings → AI providers.")
+            ui.api_status.set_text("Connected, but no model is selected in AI providers.")
             return
         }
-        ui.api_status.set_text(s.data.model.provider + " · " + s.data.model.model)
+        ui.api_status.set_text("Connected · " + s.data.model.provider + " · " + s.data.model.model)
     })
 }
 fn set_scope(name){
@@ -377,7 +377,7 @@ fn run_turn(context, question){
     let prompt = "You are AgentMail. Answer using only the mail context. If it is not enough, say so. Do not invent messages. Reply in the user's language.\n\nMail context:\n" + context + "\n\nRecent conversation:\n" + history_text() + "\nQuestion: " + question
     prompt = clip(prompt, 20000)
     host.request("octos.session.open", {}, fn(s){
-        if !s.is_ok { finish_turn("Assistant unavailable"); return }
+        if !s.is_ok { finish_turn(s.error); return }
         host.request("octos.turn.start", {text: prompt}, fn(r){
             if r.is_ok { finish_turn(r.data.text) }
             else { finish_turn(r.error) }
@@ -421,7 +421,7 @@ fn ai_summarize(){
     ui.r_ai.set_visible(true)
     ui.r_ai.set_text("Summarizing...")
     host.request("octos.session.open", {}, fn(s){
-        if !s.is_ok { ui.r_ai.set_text("Assistant unavailable"); return }
+        if !s.is_ok { ui.r_ai.set_text(s.error); return }
         host.request("octos.turn.start", {text: "Summarize this email in one sentence:\n\n" + reading.body}, fn(r){
             if r.is_ok { ui.r_ai.set_text(r.data.text) }
             else { ui.r_ai.set_text("") }
@@ -510,9 +510,9 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
                             ButtonFlat{text: "Add account" width: Fill height: 36 on_click: || { commit_rename(); add_account() }
                                 draw_bg +: {color: #x00000000 color_hover: #x00000018 color_down: #x00000028 border_size: 0.0 border_radius: 8.0}
                                 draw_text +: {color: accent color_hover: accent color_down: accent text_style +: {font_size: 14}}}
-                            ButtonFlat{text: "⚙" width: 36 height: 36 padding: Inset{left: 0 right: 0 top: 1 bottom: 0} on_click: || open_settings()
-                                draw_bg +: {color: #x00000000 color_hover: #x00000018 color_down: #x00000028 border_size: 0.0 border_radius: 8.0}
-                                draw_text +: {color: secondary color_hover: ink color_down: ink text_style +: {font_size: 16}}}
+                            ButtonFlat{text: "⚙️" width: 40 height: 40 padding: Inset{left: 0 right: 0 top: 0 bottom: 0} on_click: || open_settings()
+                                draw_bg +: {color: #x00000000 color_hover: #x00000014 color_down: #x00000022 color_empty: #x00000000 color_focus: #x00000000 border_size: 0.0 border_radius: 20.0}
+                                draw_text +: {color: secondary color_hover: secondary color_down: ink text_style +: {font_size: 17}}}
                         }
                     }
                     View{width: 22 height: Fill align: Align{x: 0.5 y: 0.5}
@@ -522,19 +522,26 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
                     }
                 }
             } else {
-                SolidView{width: 44 height: Fill flow: Overlay draw_bg.color: rail_bg
+                SolidView{width: 44 height: Fill flow: Down draw_bg.color: rail_bg
                     View{width: Fill height: Fill align: Align{x: 0.5 y: 0.5}
                         GestureView{width: 28 height: 28 align: Align{x: 0.5 y: 0.5} on_tap: |x, y| toggle_rail()
                             Label{text: "›" draw_text.color: secondary draw_text.text_style.font_size: 16}
                         }
                     }
-                    View{width: Fill height: Fill flow: Down align: Align{x: 0.5 y: 1.0} padding: Inset{bottom: 12} spacing: 8
-                        ButtonFlat{text: "+" width: 36 height: 36 padding: Inset{left: 0 right: 0 top: 0 bottom: 4} on_click: || add_account()
-                            draw_bg +: {color: #x00000000 color_hover: #x00000018 color_down: #x00000028 border_size: 0.0 border_radius: 8.0}
-                            draw_text +: {color: accent color_hover: accent color_down: accent text_style +: {font_size: 22}}}
-                        ButtonFlat{text: "⚙" width: 36 height: 36 padding: Inset{left: 0 right: 0 top: 2 bottom: 0} on_click: || open_settings()
-                            draw_bg +: {color: #x00000000 color_hover: #x00000018 color_down: #x00000028 border_size: 0.0 border_radius: 8.0}
-                            draw_text +: {color: secondary color_hover: ink color_down: ink text_style +: {font_size: 16}}}
+                    View{width: Fill height: Fit flow: Down align: Align{x: 0.5} padding: Inset{bottom: 12} spacing: 8
+                        View{width: 40 height: 44 flow: Overlay
+                            View{width: 40 height: 40 align: Align{x: 0.5 y: 0.5}
+                                Label{text: "+" align: Align{x: 0.5 y: 0.5} draw_text.color: accent draw_text.text_style.font_size: 25}
+                            }
+                            View{width: 40 height: 47 padding: Inset{top: 10}
+                                ButtonFlat{width: Fill height: Fill text: "" on_click: || add_account()
+                                    draw_bg +: {color: #x00000000 color_hover: #x00000010 color_down: #x00000018 border_size: 0.0 border_radius: 50.0}
+                                    draw_text +: {color: #x00000000 color_hover: #x00000000 color_down: #x00000000}}
+                            }
+                        }
+                        ButtonFlat{text: "⚙️" width: 40 height: 40 padding: Inset{left: 0 right: 0 top: 0 bottom: 0} on_click: || open_settings()
+                            draw_bg +: {color: #x00000000 color_hover: #x00000014 color_down: #x00000022 color_empty: #x00000000 color_focus: #x00000000 border_size: 0.0 border_radius: 20.0}
+                            draw_text +: {color: secondary color_hover: secondary color_down: ink text_style +: {font_size: 20}}}
                     }
                 }
             }
@@ -623,16 +630,13 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
                             Hr{}
                         }
                     }}
-                    ButtonFlat{text: "Add account" height: 40 on_click: || add_account()
-                        draw_bg +: {border_radius: 8.0 color: #x007aff color_hover: #x0a84ff color_down: #x0062cc border_size: 0.0}
-                        draw_text +: {color: #xffffff color_hover: #xffffff color_down: #xffffff text_style +: {font_size: 15}}}
                 }
                 agent_tab := View{visible: false width: Fill height: Fill flow: Down spacing: 10
                     Label{text: "API" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 16}}
                     Label{width: Fill text: "AgentMail does not take an API key. Add your provider in OctoSense: Start → Settings → AI providers. The key stays on this device."
                         draw_text.color: secondary draw_text.text_style.font_size: 13}
                     api_status := Label{width: Fill text: "" draw_text.color: ink draw_text.text_style.font_size: 13}
-                    Bar{text: "Check connection" on_click: || refresh_provider()}
+                    Bar{text: "Test connection" on_click: || refresh_provider()}
                 }
             }
             confirm := GestureView{visible: false width: Fill height: Fill align: Align{x: 0.5 y: 0.5} on_tap: |x, y| cancel_remove()
