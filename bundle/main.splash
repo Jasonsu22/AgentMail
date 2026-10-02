@@ -1,3 +1,4 @@
+let accounts = []
 let account = nil          // {id, address}
 let messages = []
 let total = 0
@@ -5,35 +6,174 @@ let open_id = ""
 let reading = nil
 let busy = false
 let folder = {id: "INBOX" name: "Inbox"}
-let folders = []
+let folders_by = {}
+let open_by = {}
+let names = {}
+let renaming = ""
+let rename_text = ""
+let rail_open = true
+let agent_open = false
+let agent_scope = "message"
+let agent_busy = false
+let settings_tab = "account"
+let pending_remove = ""
+let chat_log = []
 
 fn status(text){ ui.status.set_text(text) }
 fn pane(name){
     ui.welcome.set_visible(name == "welcome")
     ui.inbox.set_visible(name == "inbox")
-    ui.reader.set_visible(name == "reader")
-    ui.composer.set_visible(name == "composer")
-    ui.folders.set_visible(name == "folders")
+}
+fn show_reader(){
+    ui.r_ai.set_visible(false)
+    ui.r_ai.set_text("")
+    ui.list_pane.set_visible(false)
+    ui.reader.set_visible(true)
+    ui.composer.set_visible(false)
+    ui.settings_pane.set_visible(false)
+    ui.confirm.set_visible(false)
+}
+fn show_composer(){
+    ui.list_pane.set_visible(false)
+    ui.reader.set_visible(false)
+    ui.composer.set_visible(true)
+    ui.settings_pane.set_visible(false)
+    ui.confirm.set_visible(false)
+}
+fn close_detail(){
+    reading = nil
+    open_id = ""
+    pending_remove = ""
+    ui.list_pane.set_visible(true)
+    ui.reader.set_visible(false)
+    ui.composer.set_visible(false)
+    ui.settings_pane.set_visible(false)
+    ui.confirm.set_visible(false)
+}
+fn toggle_rail(){
+    rail_open = !rail_open
+    ui.rail_slot.render()
+}
+fn display_name(a){
+    let custom = names[a.id]
+    if custom != nil && custom != "" { return custom }
+    return a.address
+}
+fn load_prefs(){
+    if fs.exists("names.txt") {
+        let lines = fs.read("names.txt").split("\n")
+        for line in lines {
+            let bits = line.split("|")
+            if bits.len() >= 2 && bits[0] != "" { names[bits[0]] = bits[1] }
+        }
+    }
+}
+fn save_names(){
+    let text = ""
+    for a in accounts {
+        let custom = names[a.id]
+        if custom != nil && custom != "" {
+            if text != "" { text = text + "\n" }
+            text = text + a.id + "|" + custom
+        }
+    }
+    fs.write("names.txt", text)
+}
+fn begin_rename(id){
+    renaming = id
+    rename_text = ""
+    for a in accounts {
+        if a.id == id { rename_text = display_name(a) }
+    }
+    ui.rename_catch.set_visible(true)
+    ui.agent_catch.set_visible(true)
+    ui.rail_slot.render()
+}
+fn commit_rename(){
+    if renaming == "" { return }
+    finish_rename(renaming, rename_text)
+}
+fn finish_rename(id, text){
+    names[id] = text.trim()
+    renaming = ""
+    rename_text = ""
+    save_names()
+    ui.rename_catch.set_visible(false)
+    ui.agent_catch.set_visible(false)
+    ui.rail_slot.render()
+}
+fn is_open(id){
+    if open_by[id] == nil { return true }
+    return open_by[id]
+}
+fn show_heading(){
+    ui.title.set_text(folder.name)
+    if account == nil { ui.address.set_text("") }
+    else { ui.address.set_text(account.address) }
 }
 fn load_accounts(){
     host.request("mail.accounts", {}, fn(r){
         if r.is_ok && r.data.len() > 0 {
-            account = r.data[0]
-            ui.address.set_text(account.address)
+            accounts = r.data
+            let keep = false
+            if account != nil {
+                for a in accounts { if a.id == account.id { keep = true } }
+            }
+            if !keep {
+                account = accounts[0]
+                folder = {id: "INBOX" name: "Inbox"}
+            }
             pane("inbox")
+            show_heading()
+            ui.rail_slot.render()
+            for a in accounts {
+                if open_by[a.id] == nil { open_by[a.id] = true }
+                load_folders(a.id)
+            }
             list()
             sync()
-            load_folders()
+            if ui.settings_pane.visible() { ui.settings_accounts.render() }
         } else {
+            accounts = []
+            account = nil
+            messages = []
             pane("welcome")
         }
     })
 }
 fn add_account(){
+    status("Sign in on the sheet OctoSense shows.")
     ui.welcome_note.set_text("Sign in on the sheet OctoSense shows.")
     host.request("mail.add_account", {}, fn(r){
-        if r.is_ok { load_accounts() } else { ui.welcome_note.set_text(r.error) }
+        if r.is_ok { load_accounts() }
+        else {
+            status(r.error)
+            ui.welcome_note.set_text(r.error)
+        }
     })
+}
+fn toggle_account(id){
+    open_by[id] = !is_open(id)
+    ui.rail_slot.render()
+}
+fn load_folders(id){
+    host.request("mail.folders", {account: id}, fn(r){
+        if r.is_ok {
+            folders_by[id] = r.data
+            ui.rail_slot.render()
+        }
+    })
+}
+fn select_folder(a, f){
+    account = a
+    folder = f
+    messages = []
+    close_detail()
+    show_heading()
+    ui.rail_slot.render()
+    ui.rows.render()
+    list()
+    sync()
 }
 fn sync(){
     if account == nil || busy { return }
@@ -50,6 +190,7 @@ fn sync(){
     })
 }
 fn list(){
+    if account == nil { return }
     host.request("mail.list", {account: account.id folder: folder.id offset: 0 limit: 100}, fn(r){
         if r.is_ok {
             messages = r.data.messages
@@ -79,8 +220,11 @@ fn open_message(m){
             }
             ui.r_attachments.set_visible(names != "")
             ui.r_attachments.set_text("Attachments: " + names)
-            pane("reader")
+            show_reader()
             m.unread = false
+            host.request("mail.mark_read", {account: account.id folder: folder.id message: m.id}, fn(done){
+                if !done.is_ok { status(done.error) }
+            })
         } else { status(r.error) }
     })
 }
@@ -89,7 +233,7 @@ fn compose(to, subject, body){
     ui.c_subject.set_text(subject)
     ui.c_body.set_text(body)
     ui.c_note.set_text("")
-    pane("composer")
+    show_composer()
 }
 fn reply(){
     if reading == nil { return }
@@ -98,44 +242,183 @@ fn reply(){
     compose(reading.address, subject, "\n\n> " + reading.body.replace("\n", "\n> "))
 }
 fn send(){
+    if account == nil { return }
     ui.c_note.set_text("Sending…")
     host.request("mail.send", {account: account.id to: ui.c_to.text() subject: ui.c_subject.text() body: ui.c_body.text()}, fn(r){
-        if r.is_ok { status("Sent"); pane("inbox"); ui.rows.render() } else { ui.c_note.set_text(r.error) }
+        if r.is_ok { status("Sent"); close_detail(); ui.rows.render() } else { ui.c_note.set_text(r.error) }
     })
 }
-fn remove_account(){
-    host.request("mail.remove_account", {account: account.id}, fn(r){
-        account = nil
-        messages = []
-        folders = []
-        folder = {id: "INBOX" name: "Inbox"}
-        ui.title.set_text("AgentMail")
-        pane("welcome")
+fn remove_account(id){
+    if id == "" { return }
+    host.request("mail.remove_account", {account: id}, fn(r){
+        if r.is_ok { load_accounts() } else { status(r.error) }
     })
 }
-fn back_to_inbox(){ pane("inbox"); ui.rows.render() }
+fn ask_remove(a){
+    pending_remove = a.id
+    ui.confirm_name.set_text(display_name(a))
+    ui.confirm.set_visible(true)
+}
+fn cancel_remove(){
+    pending_remove = ""
+    ui.confirm.set_visible(false)
+}
+fn confirm_remove(){
+    let id = pending_remove
+    pending_remove = ""
+    ui.confirm.set_visible(false)
+    remove_account(id)
+}
+fn show_tab(name){
+    settings_tab = name
+    ui.account_tab.set_visible(name == "account")
+    ui.agent_tab.set_visible(name == "agent")
+    if name == "agent" { refresh_provider() }
+    ui.settings_accounts.render()
+}
+fn show_settings(){
+    ui.list_pane.set_visible(false)
+    ui.reader.set_visible(false)
+    ui.composer.set_visible(false)
+    ui.settings_pane.set_visible(true)
+    ui.confirm.set_visible(false)
+    show_tab("account")
+}
+fn open_settings(){
+    commit_rename()
+    if ui.settings_pane.visible() { close_detail(); return }
+    show_settings()
+}
+fn back_to_inbox(){ close_detail(); ui.rows.render() }
 fn kb(n){
     if n > 1000000 { return "" + floor(n / 100000) / 10 + " MB" }
     return "" + (floor(n / 1000) + 1) + " KB"
 }
-fn load_folders(){
-    host.request("mail.folders", {account: account.id}, fn(r){
-        if r.is_ok { folders = r.data; ui.folder_rows.render() }
-    })
-}
-fn show_folders(){ pane("folders"); ui.folder_rows.render() }
-fn open_folder(f){
-    folder = f
-    messages = []
-    ui.title.set_text(f.name)
-    pane("inbox")
-    ui.rows.render()
-    list()
-    sync()
+fn folder_selected(a, f){
+    if account == nil { return false }
+    return account.id == a.id && folder.id == f.id
 }
 
+fn toggle_agent(){
+    agent_open = !agent_open
+    ui.agent_slim.set_visible(!agent_open)
+    ui.agent_panel.set_visible(agent_open)
+}
+fn refresh_provider(){
+    ui.api_status.set_text("Checking…")
+    host.request("octos.session.open", {}, fn(s){
+        if !s.is_ok {
+            ui.api_status.set_text("Not connected. Add a provider in Start → Settings → AI providers.")
+            return
+        }
+        if s.data == nil || s.data.model == nil {
+            ui.api_status.set_text("No provider yet. Open Start → Settings → AI providers.")
+            return
+        }
+        ui.api_status.set_text(s.data.model.provider + " · " + s.data.model.model)
+    })
+}
+fn set_scope(name){
+    agent_scope = name
+    if name == "mailbox" { ui.scope_note.set_text("Inbox already on this device") }
+    else { ui.scope_note.set_text("The open message") }
+}
+fn clip(text, n){
+    if text == nil { return "" }
+    if text.len() <= n { return text }
+    let lines = text.split("\n")
+    let out = ""
+    for line in lines {
+        if (out + line).len() > n {
+            if out == "" { return "…" }
+            return out + "\n…"
+        }
+        if out != "" { out = out + "\n" }
+        out = out + line
+    }
+    return out
+}
+fn message_context(){
+    if reading == nil { return "No message is open. Say that you cannot see a message." }
+    return "Subject: " + reading.subject + "\nFrom: " + reading.sender + " <" + reading.address + ">\nDate: " + reading.time + "\n\n" + clip(reading.body, 6000)
+}
+fn mailbox_digest(list, title){
+    let t = "Account: " + account.address + "\n" + title + "\nThese are messages already on this device, not the full mailbox history.\n"
+    let n = list.len()
+    if n > 24 { n = 24 }
+    for i in n {
+        let m = list[i]
+        let preview = ""
+        if m.preview != nil { preview = clip(m.preview, 80) }
+        t = t + "- " + m.time + " | " + m.sender + " | " + m.subject + " | " + preview + "\n"
+    }
+    if n == 0 { t = t + "(no messages)\n" }
+    return clip(t, 8000)
+}
+fn history_text(){
+    let t = ""
+    let start = 0
+    if chat_log.len() > 8 { start = chat_log.len() - 8 }
+    for i in chat_log.len() {
+        if i >= start {
+            let m = chat_log[i]
+            t = t + m.role + ": " + clip(m.text, 800) + "\n"
+        }
+    }
+    return t
+}
+fn finish_turn(text){
+    agent_busy = false
+    ui.agent_note.set_text("")
+    chat_log.push({role: "agent" text: text})
+    ui.chat_view.render()
+}
+fn run_turn(context, question){
+    let prompt = "You are AgentMail. Answer using only the mail context. If it is not enough, say so. Do not invent messages. Reply in the user's language.\n\nMail context:\n" + context + "\n\nRecent conversation:\n" + history_text() + "\nQuestion: " + question
+    prompt = clip(prompt, 20000)
+    host.request("octos.session.open", {}, fn(s){
+        if !s.is_ok { finish_turn("Assistant unavailable"); return }
+        host.request("octos.turn.start", {text: prompt}, fn(r){
+            if r.is_ok { finish_turn(r.data.text) }
+            else { finish_turn(r.error) }
+        })
+    })
+}
+fn ask_agent(){
+    if agent_busy || account == nil { return }
+    let q = ui.agent_input.text().trim()
+    if q == "" { return }
+    ui.agent_input.set_text("")
+    chat_log.push({role: "user" text: q})
+    ui.chat_view.render()
+    agent_busy = true
+    ui.agent_note.set_text("Thinking…")
+    if agent_scope == "mailbox" {
+        host.request("mail.list", {account: account.id folder: "INBOX" offset: 0 limit: 30}, fn(r){
+            if r.is_ok { run_turn(mailbox_digest(r.data.messages, "Inbox"), q) }
+            else if messages.len() > 0 { run_turn(mailbox_digest(messages, folder.name), q) }
+            else { run_turn("No messages are loaded for this account.", q) }
+        })
+    } else {
+        run_turn(message_context(), q)
+    }
+}
+fn use_draft(){
+    let text = ""
+    for m in chat_log { if m.role == "agent" { text = m.text } }
+    if text == "" { ui.agent_note.set_text("Ask a question first."); return }
+    let to = ""
+    let subject = ""
+    if reading != nil {
+        to = reading.address
+        subject = reading.subject
+        if subject.search("Re:") != 0 { subject = "Re: " + subject }
+    }
+    compose(to, subject, text)
+}
 fn ai_summarize(){
     if reading == nil { return }
+    ui.r_ai.set_visible(true)
     ui.r_ai.set_text("Summarizing...")
     host.request("octos.session.open", {}, fn(s){
         if !s.is_ok { ui.r_ai.set_text("Assistant unavailable"); return }
@@ -146,11 +429,12 @@ fn ai_summarize(){
     })
 }
 
-start_timeout(0.05, || load_accounts())
+start_timeout(0.05, || { load_prefs(); load_accounts() })
 
 let ink = #x1c1c1e
 let secondary = #x8e8e93
 let accent = #x007aff
+let rail_bg = #xf2f2f7
 let Bar = ButtonFlat{height: 36 padding: Inset{left: 10 right: 10}
     draw_bg +: {color: #x00000000 color_hover: #x0000000a color_down: #x00000014 border_size: 0.0}
     draw_text +: {color: accent color_hover: accent color_down: accent text_style +: {font_size: 15}}
@@ -180,39 +464,109 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
             draw_text +: {color: #xffffff color_hover: #xffffff color_down: #xffffff text_style +: {font_size: 15}}}
         welcome_note := Label{width: Fill align: Align{x: 0.5} text: "" draw_text.color: secondary draw_text.text_style.font_size: 12}
     }
-    inbox := View{visible: false width: Fill height: Fill flow: Down
-        View{width: Fill height: Fit flow: Right align: Align{y: 0.5} padding: Inset{left: 8 right: 8 top: 8}
-            Bar{text: "Folders" on_click: || show_folders()}
-            Bar{text: "Refresh" on_click: || sync()}
-            View{width: Fill height: 1}
-            Bar{text: "Compose" on_click: || compose("", "", "")}
-        }
-        View{width: Fill height: Fit flow: Down padding: Inset{left: 16 right: 16 bottom: 6} spacing: 2
-            title := Label{text: "AgentMail" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 30}}
-            address := Label{text: "" draw_text.color: secondary draw_text.text_style.font_size: 12}
-            status := Label{text: "" draw_text.color: secondary draw_text.text_style.font_size: 12}
-        }
-        rows := ScrollYView{width: Fill height: Fill flow: Down on_render: || {
-            if messages.len() == 0 {
-                View{width: Fill height: 160 align: Align{x: 0.5 y: 0.5}
-                    Label{text: "No mail yet." draw_text.color: secondary draw_text.text_style.font_size: 13}}
-            }
-            else for m in messages {
-                if m.unread {
-                    Row{on_tap: |x, y| open_message(m) top.sender.text: m.sender top.time.text: m.time subject.text: m.subject preview.text: m.preview}
-                } else {
-                    RowRead{on_tap: |x, y| open_message(m) top.sender.text: m.sender top.time.text: m.time subject.text: m.subject preview.text: m.preview}
+    inbox := View{visible: false width: Fill height: Fill flow: Right
+        rail_slot := View{width: Fit height: Fill on_render: || {
+            if rail_open {
+                SolidView{width: 220 height: Fill flow: Right draw_bg.color: rail_bg
+                    View{width: Fill height: Fill flow: Down
+                        ScrollYView{width: Fill height: Fill flow: Down padding: Inset{top: 14 bottom: 8}
+                            for a in accounts {
+                                let glyph = "▸"
+                                if is_open(a.id) { glyph = "▾" }
+                                if renaming == a.id {
+                                    TextInput{width: Fill height: 34 text: rename_text empty_text: "Name" on_change: |text| rename_text = text on_return: |text| finish_rename(a.id, text)
+                                        draw_bg +: {color: #xffffff border_radius: 6.0}
+                                        draw_text +: {color: ink text_style +: {font_size: 13}}}
+                                } else {
+                                    GestureView{width: Fill height: Fit flow: Right align: Align{y: 0.0} padding: Inset{left: 4 right: 8 top: 8 bottom: 8} spacing: 4
+                                        GestureView{width: 28 height: 22 align: Align{x: 0.5 y: 0.0} on_tap: |x, y| toggle_account(a.id)
+                                            Label{text: glyph align: Align{x: 0.5} draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 13}}
+                                        }
+                                        GestureView{width: Fill height: Fit on_double_tap: |x, y| begin_rename(a.id)
+                                            Label{width: Fill text: display_name(a) draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 13}}
+                                        }
+                                    }
+                                }
+                                if is_open(a.id) {
+                                    let found = folders_by[a.id]
+                                    if found == nil {
+                                        Label{padding: Inset{left: 28} text: "Loading…" draw_text.color: secondary draw_text.text_style.font_size: 12}
+                                    } else for f in found {
+                                        if folder_selected(a, f) {
+                                            GestureView{width: Fill height: 32 flow: Right align: Align{y: 0.5} padding: Inset{left: 28 right: 8} on_tap: |x, y| { commit_rename(); select_folder(a, f) }
+                                                Label{width: Fill text: f.name max_lines: 1 draw_text.color: accent draw_text.text_style: theme.font_bold{font_size: 14}}
+                                            }
+                                        } else {
+                                            GestureView{width: Fill height: 32 flow: Right align: Align{y: 0.5} padding: Inset{left: 28 right: 8} on_tap: |x, y| { commit_rename(); select_folder(a, f) }
+                                                Label{width: Fill text: f.name max_lines: 1 draw_text.color: ink draw_text.text_style.font_size: 14}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            GestureView{width: Fill height: Fill on_tap: |x, y| commit_rename()}
+                        }
+                        View{width: Fill height: Fit flow: Right align: Align{y: 0.5} padding: Inset{left: 8 right: 8 bottom: 10} spacing: 2
+                            ButtonFlat{text: "Add account" width: Fill height: 36 on_click: || { commit_rename(); add_account() }
+                                draw_bg +: {color: #x00000000 color_hover: #x00000018 color_down: #x00000028 border_size: 0.0 border_radius: 8.0}
+                                draw_text +: {color: accent color_hover: accent color_down: accent text_style +: {font_size: 14}}}
+                            ButtonFlat{text: "⚙" width: 36 height: 36 padding: Inset{left: 0 right: 0 top: 1 bottom: 0} on_click: || open_settings()
+                                draw_bg +: {color: #x00000000 color_hover: #x00000018 color_down: #x00000028 border_size: 0.0 border_radius: 8.0}
+                                draw_text +: {color: secondary color_hover: ink color_down: ink text_style +: {font_size: 16}}}
+                        }
+                    }
+                    View{width: 22 height: Fill align: Align{x: 0.5 y: 0.5}
+                        GestureView{width: 22 height: 36 align: Align{x: 0.5 y: 0.5} on_tap: |x, y| { commit_rename(); toggle_rail() }
+                            Label{text: "‹" draw_text.color: secondary draw_text.text_style.font_size: 16}
+                        }
+                    }
                 }
-                Hr{}
+            } else {
+                SolidView{width: 44 height: Fill flow: Overlay draw_bg.color: rail_bg
+                    View{width: Fill height: Fill align: Align{x: 0.5 y: 0.5}
+                        GestureView{width: 28 height: 28 align: Align{x: 0.5 y: 0.5} on_tap: |x, y| toggle_rail()
+                            Label{text: "›" draw_text.color: secondary draw_text.text_style.font_size: 16}
+                        }
+                    }
+                    View{width: Fill height: Fill flow: Down align: Align{x: 0.5 y: 1.0} padding: Inset{bottom: 12} spacing: 8
+                        ButtonFlat{text: "+" width: 36 height: 36 padding: Inset{left: 0 right: 0 top: 0 bottom: 4} on_click: || add_account()
+                            draw_bg +: {color: #x00000000 color_hover: #x00000018 color_down: #x00000028 border_size: 0.0 border_radius: 8.0}
+                            draw_text +: {color: accent color_hover: accent color_down: accent text_style +: {font_size: 22}}}
+                        ButtonFlat{text: "⚙" width: 36 height: 36 padding: Inset{left: 0 right: 0 top: 2 bottom: 0} on_click: || open_settings()
+                            draw_bg +: {color: #x00000000 color_hover: #x00000018 color_down: #x00000028 border_size: 0.0 border_radius: 8.0}
+                            draw_text +: {color: secondary color_hover: ink color_down: ink text_style +: {font_size: 16}}}
+                    }
+                }
             }
         }}
-        View{width: Fill height: Fit padding: Inset{left: 8 bottom: 8}
-            ButtonFlat{text: "Remove account" on_click: || remove_account()
-                draw_bg +: {color: #x00000000 color_hover: #x00000000 color_down: #x00000000 border_size: 0.0}
-                draw_text +: {color: #xff3b30 color_hover: #xff3b30 color_down: #xff3b30 text_style +: {font_size: 12}}}
-        }
-    }
-    reader := SolidView{visible: false width: Fill height: Fill flow: Down new_batch: true draw_bg.color: #xffffff
+        View{width: Fill height: Fill flow: Overlay
+            list_pane := View{width: Fill height: Fill flow: Down
+                View{width: Fill height: Fit flow: Right align: Align{y: 0.5} padding: Inset{left: 8 right: 8 top: 8}
+                    Bar{text: "Refresh" on_click: || sync()}
+                    View{width: Fill height: 1}
+                    Bar{text: "Compose" on_click: || compose("", "", "")}
+                }
+                View{width: Fill height: Fit flow: Down padding: Inset{left: 16 right: 16 bottom: 6} spacing: 2
+                    title := Label{text: "Inbox" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 30}}
+                    address := Label{text: "" draw_text.color: secondary draw_text.text_style.font_size: 12}
+                    status := Label{text: "" draw_text.color: secondary draw_text.text_style.font_size: 12}
+                }
+                rows := ScrollYView{width: Fill height: Fill flow: Down on_render: || {
+                    if messages.len() == 0 {
+                        View{width: Fill height: 160 align: Align{x: 0.5 y: 0.5}
+                            Label{text: "No mail yet." draw_text.color: secondary draw_text.text_style.font_size: 13}}
+                    }
+                    else for m in messages {
+                        if m.unread {
+                            Row{on_tap: |x, y| open_message(m) top.sender.text: m.sender top.time.text: m.time subject.text: m.subject preview.text: m.preview}
+                        } else {
+                            RowRead{on_tap: |x, y| open_message(m) top.sender.text: m.sender top.time.text: m.time subject.text: m.subject preview.text: m.preview}
+                        }
+                        Hr{}
+                    }
+                }}
+            }
+            reader := SolidView{visible: false width: Fill height: Fill flow: Down new_batch: true draw_bg.color: #xffffff
         View{width: Fill height: Fit flow: Right align: Align{y: 0.5} padding: Inset{left: 8 right: 8 top: 8}
             Bar{text: "‹ Back" on_click: || back_to_inbox()}
             View{width: Fill height: 1}
@@ -233,27 +587,7 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
                 text_style_italic +: {font_size: 15} text_style_bold_italic +: {font_size: 15} text_style_fixed +: {font_size: 14}}
         }
     }
-    folders := SolidView{visible: false width: Fill height: Fill flow: Down new_batch: true draw_bg.color: #xffffff
-        View{width: Fill height: Fit flow: Right align: Align{y: 0.5} padding: Inset{left: 8 right: 8 top: 8}
-            Bar{text: "‹ Back" on_click: || back_to_inbox()}
-        }
-        View{width: Fill height: Fit padding: Inset{left: 16 right: 16 bottom: 6}
-            Label{text: "Folders" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 30}}
-        }
-        folder_rows := ScrollYView{width: Fill height: Fill flow: Down on_render: || {
-            if folders.len() == 0 {
-                View{width: Fill height: 120 align: Align{x: 0.5 y: 0.5}
-                    Label{text: "Looking for folders…" draw_text.color: secondary draw_text.text_style.font_size: 13}}
-            }
-            else for f in folders {
-                GestureView{width: Fill height: 48 flow: Right align: Align{y: 0.5} padding: Inset{left: 16 right: 16} on_tap: |x, y| open_folder(f)
-                    Label{width: Fill text: f.name draw_text.color: ink draw_text.text_style.font_size: 16}
-                }
-                Hr{}
-            }
-        }}
-    }
-    composer := SolidView{visible: false width: Fill height: Fill flow: Down new_batch: true draw_bg.color: #xffffff padding: Inset{left: 12 right: 12 top: 8} spacing: 8
+    composer := SolidView{visible: false width: Fill height: Fill flow: Down new_batch: true draw_bg.color: #ffffff padding: Inset{left: 12 right: 12 top: 8} spacing: 8
         View{width: Fill height: Fit flow: Right align: Align{y: 0.5}
             Bar{text: "Cancel" on_click: || back_to_inbox()}
             View{width: Fill height: 1}
@@ -264,5 +598,112 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
         c_body := Field{height: 260 empty_text: "Message"}
         c_note := Label{width: Fill text: "" draw_text.color: #xff3b30 draw_text.text_style.font_size: 12}
     }
+            settings_pane := SolidView{visible: false width: Fill height: Fill flow: Down draw_bg.color: #xffffff padding: Inset{left: 16 right: 16 top: 8 bottom: 16} spacing: 12
+                View{width: Fill height: Fit flow: Right align: Align{y: 0.5}
+                    Bar{text: "‹ Back" on_click: || close_detail()}
+                    View{width: Fill height: 1}
+                    Label{text: "Settings" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 20}}
+                }
+                View{width: Fill height: Fit flow: Right
+                    Bar{text: "Accounts" on_click: || show_tab("account")}
+                    Bar{text: "Agent" on_click: || show_tab("agent")}
+                }
+                account_tab := View{width: Fill height: Fill flow: Down spacing: 8
+                    settings_accounts := ScrollYView{width: Fill height: Fill flow: Down spacing: 4 on_render: || {
+                        if accounts.len() == 0 {
+                            Label{text: "No accounts yet." draw_text.color: secondary draw_text.text_style.font_size: 13}
+                        }
+                        for a in accounts {
+                            View{width: Fill height: Fit flow: Right align: Align{y: 0.5} padding: Inset{top: 8 bottom: 8}
+                                Label{width: Fill text: display_name(a) draw_text.color: ink draw_text.text_style.font_size: 15}
+                                ButtonFlat{text: "Remove" height: 32 padding: Inset{left: 12 right: 12} on_click: || ask_remove(a)
+                                    draw_bg +: {color: #x00000000 color_hover: #x0000000a color_down: #x00000014 border_size: 0.0}
+                                    draw_text +: {color: #xff3b30 color_hover: #xff3b30 color_down: #xff3b30 text_style +: {font_size: 14}}}
+                            }
+                            Hr{}
+                        }
+                    }}
+                    ButtonFlat{text: "Add account" height: 40 on_click: || add_account()
+                        draw_bg +: {border_radius: 8.0 color: #x007aff color_hover: #x0a84ff color_down: #x0062cc border_size: 0.0}
+                        draw_text +: {color: #xffffff color_hover: #xffffff color_down: #xffffff text_style +: {font_size: 15}}}
+                }
+                agent_tab := View{visible: false width: Fill height: Fill flow: Down spacing: 10
+                    Label{text: "API" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 16}}
+                    Label{width: Fill text: "AgentMail does not take an API key. Add your provider in OctoSense: Start → Settings → AI providers. The key stays on this device."
+                        draw_text.color: secondary draw_text.text_style.font_size: 13}
+                    api_status := Label{width: Fill text: "" draw_text.color: ink draw_text.text_style.font_size: 13}
+                    Bar{text: "Check connection" on_click: || refresh_provider()}
+                }
+            }
+            confirm := GestureView{visible: false width: Fill height: Fill align: Align{x: 0.5 y: 0.5} on_tap: |x, y| cancel_remove()
+                draw_bg.color: #x66000000
+                GestureView{width: 320 height: Fit on_tap: |x, y| { }
+                    SolidView{width: Fill height: Fit flow: Down padding: 20 spacing: 12 draw_bg.color: #xffffff
+                        Label{text: "Remove this account?" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 18}}
+                        confirm_name := Label{width: Fill text: "" draw_text.color: secondary draw_text.text_style.font_size: 14}
+                        View{width: Fill height: Fit flow: Right
+                            Bar{text: "Cancel" on_click: || cancel_remove()}
+                            View{width: Fill height: 1}
+                            ButtonFlat{text: "Remove" height: 36 padding: Inset{left: 12 right: 12} on_click: || confirm_remove()
+                                draw_bg +: {color: #x00000000 color_hover: #x0000000a color_down: #x00000014 border_size: 0.0}
+                                draw_text +: {color: #xff3b30 color_hover: #xff3b30 color_down: #xff3b30 text_style +: {font_size: 15}}}
+                        }
+                    }
+                }
+            }
+            rename_catch := GestureView{visible: false width: Fill height: Fill on_tap: |x, y| commit_rename()}
+        }
+        agent_slim := SolidView{width: 44 height: Fill flow: Overlay draw_bg.color: rail_bg
+            SolidView{width: 1 height: Fill draw_bg.color: #xe5e5ea}
+            View{width: Fill height: Fill align: Align{x: 0.5 y: 0.5}
+                GestureView{width: 28 height: 28 align: Align{x: 0.5 y: 0.5} on_tap: |x, y| toggle_agent()
+                    Label{text: "‹" draw_text.color: secondary draw_text.text_style.font_size: 16}
+                }
+            }
+        }
+        agent_panel := SolidView{visible: false width: 320 height: Fill flow: Right draw_bg.color: #xfafafa
+            SolidView{width: 1 height: Fill draw_bg.color: #xe5e5ea}
+            View{width: 22 height: Fill align: Align{x: 0.5 y: 0.5}
+                GestureView{width: 22 height: 36 align: Align{x: 0.5 y: 0.5} on_tap: |x, y| toggle_agent()
+                    Label{text: "›" draw_text.color: secondary draw_text.text_style.font_size: 16}
+                }
+            }
+            View{width: Fill height: Fill flow: Down padding: Inset{right: 12 top: 8 bottom: 10} spacing: 8
+                Label{text: "Agent" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 20}}
+                View{width: Fill height: Fill flow: Overlay
+                    agent_chat := View{width: Fill height: Fill flow: Down spacing: 8
+                View{width: Fill height: Fit flow: Right
+                    Bar{text: "This message" on_click: || set_scope("message")}
+                    Bar{text: "Mailbox" on_click: || set_scope("mailbox")}
+                }
+                scope_note := Label{width: Fill text: "The open message" draw_text.color: secondary draw_text.text_style.font_size: 12}
+                chat_view := ScrollYView{width: Fill height: Fill flow: Down spacing: 10 on_render: || {
+                    if chat_log.len() == 0 {
+                        Label{width: Fill text: "Ask about the open message, or switch to the mailbox." draw_text.color: secondary draw_text.text_style.font_size: 13}
+                    }
+                    for m in chat_log {
+                        if m.role == "user" {
+                            Label{width: Fill text: m.text draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 14}}
+                        } else {
+                            Label{width: Fill text: m.text draw_text.color: ink draw_text.text_style.font_size: 14}
+                        }
+                    }
+                }}
+                agent_note := Label{width: Fill text: "" draw_text.color: secondary draw_text.text_style.font_size: 12}
+                agent_input := TextInput{width: Fill height: 40 empty_text: "Ask" on_return: |text| ask_agent()
+                    draw_bg +: {color: #xffffff color_hover: #xffffff color_focus: #xffffff color_empty: #xffffff
+                        border_color: #xe5e5ea border_color_hover: #xe5e5ea border_color_focus: accent border_color_empty: #xe5e5ea border_radius: 10.0}
+                    draw_text +: {color: ink color_hover: ink color_focus: ink color_empty: secondary color_empty_hover: secondary}
+                }
+                View{width: Fill height: Fit flow: Right
+                    Bar{text: "Ask" on_click: || ask_agent()}
+                    View{width: Fill height: 1}
+                    Bar{text: "Use as draft" on_click: || use_draft()}
+                }
+                    }
+                    agent_catch := GestureView{visible: false width: Fill height: Fill on_tap: |x, y| commit_rename()}
+                }
+            }
+        }
+    }
 }
-
