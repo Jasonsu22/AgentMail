@@ -12,10 +12,10 @@
   },
   "id": "agent-mail",
   "integrity": {
-    "bundle_blake3": "0745a186ac525c59b4b31fd4eb7cd8955d831debd12cb27ba64392bc5f438617",
+    "bundle_blake3": "44d41b008daf52dde862591ee8946c3c95697b87daf16bbaac1aae1bab29a3f7",
     "signature": {
       "key_id": "agent-mail-test",
-      "value": "d981be46a8c407b249c67964093e94496e3c161fd0879291eec4103ee6d3e44a26a16cb423cd684967bedd78ac78053a4ed07d333b5581da9a2e9058de55720d"
+      "value": "475c5e33fc7c176db682139c17e4bbece739e580ae30c75c6aa7e3bf95cd63c5fe7b16ab9690ffb0a662e4f90e1ec1894c0bd6b561c33b525b8b4a7a3efac50a"
     }
   },
   "name": "AgentMail",
