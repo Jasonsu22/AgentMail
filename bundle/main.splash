@@ -109,7 +109,7 @@ fn remove_account(){
         messages = []
         folders = []
         folder = {id: "INBOX" name: "Inbox"}
-        ui.title.set_text("Agent Mail")
+        ui.title.set_text("AgentMail")
         pane("welcome")
     })
 }
@@ -172,7 +172,7 @@ let RowRead = Row{top +: {sender +: {draw_text.text_style: theme.font_regular{fo
 
 SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
     welcome := View{width: Fill height: Fill flow: Down align: Align{x: 0.5 y: 0.5} spacing: 12 padding: 32
-        Label{text: "Agent Mail" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 32}}
+        Label{text: "AgentMail" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 32}}
         Label{width: Fill align: Align{x: 0.5} text: "Add an account to read and send mail. OctoSense keeps your password; Mail never sees it."
             draw_text.color: secondary draw_text.text_style.font_size: 13}
         ButtonFlat{text: "Add account" height: 44 padding: Inset{left: 22 right: 22} on_click: || add_account()
@@ -188,7 +188,7 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
             Bar{text: "Compose" on_click: || compose("", "", "")}
         }
         View{width: Fill height: Fit flow: Down padding: Inset{left: 16 right: 16 bottom: 6} spacing: 2
-            title := Label{text: "Agent Mail" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 30}}
+            title := Label{text: "AgentMail" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 30}}
             address := Label{text: "" draw_text.color: secondary draw_text.text_style.font_size: 12}
             status := Label{text: "" draw_text.color: secondary draw_text.text_style.font_size: 12}
         }
