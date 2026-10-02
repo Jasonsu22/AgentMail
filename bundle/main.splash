@@ -173,7 +173,7 @@ let RowRead = Row{top +: {sender +: {draw_text.text_style: theme.font_regular{fo
 SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
     welcome := View{width: Fill height: Fill flow: Down align: Align{x: 0.5 y: 0.5} spacing: 12 padding: 32
         Label{text: "AgentMail" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 32}}
-        Label{width: Fill align: Align{x: 0.5} text: "Add an account to read and send mail. OctoSense keeps your password; Mail never sees it."
+        Label{width: Fill align: Align{x: 0.5} text: "Add an account to read and send mail. OctoSense keeps your password; AgentMail never sees it."
             draw_text.color: secondary draw_text.text_style.font_size: 13}
         ButtonFlat{text: "Add account" height: 44 padding: Inset{left: 22 right: 22} on_click: || add_account()
             draw_bg +: {border_radius: 22.0 color: #x007aff color_hover: #x0a84ff color_down: #x0062cc border_size: 0.0}
