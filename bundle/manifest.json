@@ -3,8 +3,7 @@
   "capabilities": [
     "storage",
     "mail",
-    "octos.session.open",
-    "octos.turn.start"
+    "model"
   ],
   "compute": {
     "instruction_budget": null,
@@ -12,10 +11,10 @@
   },
   "id": "agent-mail",
   "integrity": {
-    "bundle_blake3": "0de733d85e1200a0cba1337441ae3b6b994fa31af62bc3d790d7adda063f4317",
+    "bundle_blake3": "0b03c3d9540d113887cf73ca16b8bc4d327637b4d66229b791c0b74d0221a975",
     "signature": {
       "key_id": "agent-mail-test",
-      "value": "fbb873bae16220fc5197a78ffbebb35f0843273920f543e527dd04428c9c63c377d274b712f60472bd16f1b7815255a21b4297ac6a52d674ff1bdbdf24f8d006"
+      "value": "aae78c1f6b6bd8ef9ab6f7df480ee4c7052bb1d6f977f139e0383ed64e0aca0a3992089905c344ca18241018a8ef3a677f87e1e24961863e648d39c764178c09"
     }
   },
   "name": "AgentMail",
@@ -26,5 +25,5 @@
   "storage": {
     "max_bytes": null
   },
-  "version": "0.30.55"
+  "version": "0.30.63"
 }

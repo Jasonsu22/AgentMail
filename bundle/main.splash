@@ -304,18 +304,27 @@ fn toggle_agent(){
     ui.agent_slim.set_visible(!agent_open)
     ui.agent_panel.set_visible(agent_open)
 }
+fn answer_schema(){
+    return {type: "object" required: ["answer"] additionalProperties: false
+        properties: {answer: {type: "string" minLength: 1 maxLength: 4000}}}
+}
+fn take_answer(r){
+    if !r.is_ok { return r.error }
+    if r.data != nil && r.data.output != nil && r.data.output.answer != nil {
+        return r.data.output.answer
+    }
+    return "The model returned no answer."
+}
 fn refresh_provider(){
     ui.api_status.set_text("Testing the connection…")
-    host.request("octos.session.open", {}, fn(s){
-        if !s.is_ok {
-            ui.api_status.set_text(s.error)
-            return
-        }
-        if s.data == nil || s.data.model == nil {
-            ui.api_status.set_text("Connected, but no model is selected in AI providers.")
-            return
-        }
-        ui.api_status.set_text("Connected · " + s.data.model.provider + " · " + s.data.model.model)
+    host.request("model.complete", {
+        task: "Reply with the word ok."
+        input: {ping: "ok"}
+        schema: answer_schema()
+        class: "fast"
+    }, fn(s){
+        if s.is_ok { ui.api_status.set_text("Connected · using the model in AI providers") }
+        else { ui.api_status.set_text(s.error) }
     })
 }
 fn set_scope(name){
@@ -374,14 +383,14 @@ fn finish_turn(text){
     ui.chat_view.render()
 }
 fn run_turn(context, question){
-    let prompt = "You are AgentMail. Answer using only the mail context. If it is not enough, say so. Do not invent messages. Reply in the user's language.\n\nMail context:\n" + context + "\n\nRecent conversation:\n" + history_text() + "\nQuestion: " + question
-    prompt = clip(prompt, 20000)
-    host.request("octos.session.open", {}, fn(s){
-        if !s.is_ok { finish_turn(s.error); return }
-        host.request("octos.turn.start", {text: prompt}, fn(r){
-            if r.is_ok { finish_turn(r.data.text) }
-            else { finish_turn(r.error) }
-        })
+    host.request("model.complete", {
+        task: "You are AgentMail. Answer using only the mail context. If it is not enough, say so. Do not invent messages. Reply in the user's language. Put the whole reply in answer."
+        input: {mail: clip(context, 8000) history: clip(history_text(), 2500) question: question}
+        schema: answer_schema()
+        class: "fast"
+        allow_urls: true
+    }, fn(r){
+        finish_turn(take_answer(r))
     })
 }
 fn ask_agent(){
@@ -420,12 +429,14 @@ fn ai_summarize(){
     if reading == nil { return }
     ui.r_ai.set_visible(true)
     ui.r_ai.set_text("Summarizing...")
-    host.request("octos.session.open", {}, fn(s){
-        if !s.is_ok { ui.r_ai.set_text(s.error); return }
-        host.request("octos.turn.start", {text: "Summarize this email in one sentence:\n\n" + reading.body}, fn(r){
-            if r.is_ok { ui.r_ai.set_text(r.data.text) }
-            else { ui.r_ai.set_text("") }
-        })
+    host.request("model.complete", {
+        task: "Summarize this email in one sentence. Put the sentence in answer."
+        input: {subject: reading.subject from: reading.sender body: clip(reading.body, 6000)}
+        schema: answer_schema()
+        class: "fast"
+        allow_urls: true
+    }, fn(r){
+        ui.r_ai.set_text(take_answer(r))
     })
 }
 
