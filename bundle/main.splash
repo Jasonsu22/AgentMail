@@ -50,7 +50,7 @@ let target_lang = "中文"
 let lang_open = false
 let lang_is_other = false
 let custom_lang = ""
-let lang_labels = ["English" "中文" "Español" "Français" "Deutsch" "日本語" "한국어" "Português" "Italiano" "Русский" "العربية" "हिन्दी" "Türkçe" "Tiếng Việt" "Bahasa Indonesia" "ไทย" "Nederlands" "Polski" "Other"]
+let lang_labels = ["English" "中文" "Français" "日本語" "Русский" "Others"]
 let trans_busy = false
 let view_trans = {}
 let saved_sum = {}
@@ -573,8 +573,14 @@ fn load_tools(){
             custom_lang = other
             if other != "" { target_lang = other }
         } else if line != "" {
-            lang_is_other = false
-            target_lang = line
+            if known_lang(line) {
+                lang_is_other = false
+                target_lang = line
+            } else {
+                lang_is_other = true
+                custom_lang = line
+                target_lang = line
+            }
         }
     }
     if !fs.exists("tools.txt") { return }
@@ -590,9 +596,15 @@ fn load_tools(){
         }
     }
 }
+fn known_lang(name){
+    for label in lang_labels {
+        if label == name && name != "Others" { return true }
+    }
+    return false
+}
 fn refresh_lang_face(){
     let shown = target_lang
-    if lang_is_other { shown = "Other" }
+    if lang_is_other { shown = "Others" }
     ui.lang_name.set_text(shown)
     if lang_open { ui.lang_mark.set_text("▴") }
     else { ui.lang_mark.set_text("▾") }
@@ -606,7 +618,7 @@ fn pick_lang(i){
     let name = lang_labels[i]
     lang_open = false
     ui.lang_menu.set_visible(false)
-    if name == "Other" {
+    if name == "Others" {
         lang_is_other = true
         ui.lang_custom.set_visible(true)
         if custom_lang != "" { target_lang = custom_lang }
@@ -1671,46 +1683,20 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
                             lang_mark := Label{text: "▾" draw_text.color: secondary draw_text.text_style.font_size: 14}
                         }
                     }
-                    lang_menu := SolidView{visible: false width: Fill height: 220 flow: Down draw_bg.color: #xf2f2f7
+                    lang_menu := SolidView{visible: false width: Fill height: 216 flow: Down draw_bg.color: #xf2f2f7
                         ScrollYView{width: Fill height: Fill flow: Down
                             GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(0)
                                 Label{width: Fill text: "English" draw_text.color: ink draw_text.text_style.font_size: 15}}
                             GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(1)
                                 Label{width: Fill text: "中文" draw_text.color: ink draw_text.text_style.font_size: 15}}
                             GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(2)
-                                Label{width: Fill text: "Español" draw_text.color: ink draw_text.text_style.font_size: 15}}
-                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(3)
                                 Label{width: Fill text: "Français" draw_text.color: ink draw_text.text_style.font_size: 15}}
-                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(4)
-                                Label{width: Fill text: "Deutsch" draw_text.color: ink draw_text.text_style.font_size: 15}}
-                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(5)
+                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(3)
                                 Label{width: Fill text: "日本語" draw_text.color: ink draw_text.text_style.font_size: 15}}
-                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(6)
-                                Label{width: Fill text: "한국어" draw_text.color: ink draw_text.text_style.font_size: 15}}
-                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(7)
-                                Label{width: Fill text: "Português" draw_text.color: ink draw_text.text_style.font_size: 15}}
-                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(8)
-                                Label{width: Fill text: "Italiano" draw_text.color: ink draw_text.text_style.font_size: 15}}
-                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(9)
+                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(4)
                                 Label{width: Fill text: "Русский" draw_text.color: ink draw_text.text_style.font_size: 15}}
-                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(10)
-                                Label{width: Fill text: "العربية" draw_text.color: ink draw_text.text_style.font_size: 15}}
-                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(11)
-                                Label{width: Fill text: "हिन्दी" draw_text.color: ink draw_text.text_style.font_size: 15}}
-                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(12)
-                                Label{width: Fill text: "Türkçe" draw_text.color: ink draw_text.text_style.font_size: 15}}
-                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(13)
-                                Label{width: Fill text: "Tiếng Việt" draw_text.color: ink draw_text.text_style.font_size: 15}}
-                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(14)
-                                Label{width: Fill text: "Bahasa Indonesia" draw_text.color: ink draw_text.text_style.font_size: 15}}
-                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(15)
-                                Label{width: Fill text: "ไทย" draw_text.color: ink draw_text.text_style.font_size: 15}}
-                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(16)
-                                Label{width: Fill text: "Nederlands" draw_text.color: ink draw_text.text_style.font_size: 15}}
-                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(17)
-                                Label{width: Fill text: "Polski" draw_text.color: ink draw_text.text_style.font_size: 15}}
-                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(18)
-                                Label{width: Fill text: "Other" draw_text.color: ink draw_text.text_style.font_size: 15}}
+                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(5)
+                                Label{width: Fill text: "Others" draw_text.color: ink draw_text.text_style.font_size: 15}}
                         }
                     }
                     lang_custom := View{visible: false width: Fill height: Fit
