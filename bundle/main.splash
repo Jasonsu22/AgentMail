@@ -23,6 +23,12 @@ let pending_remove = ""
 let chat_log = []
 let pending_q = ""
 let pending_input = ""
+let pending_event = nil
+let saved_events = []
+let turn_can_add = false
+let follow_gen = 0
+let follow_locked = false
+let chat_follow = true
 let history_open = false
 let sessions = []
 let active_session = -1
@@ -104,6 +110,7 @@ fn load_prefs(){
     load_chats()
     load_tools()
     load_classes()
+    load_events()
     if fs.exists("names.txt") {
         let lines = fs.read("names.txt").split("\n")
         for line in lines {
@@ -500,6 +507,16 @@ fn plan_schema(){
             answer: {type: "string" maxLength: 4000}
         }}
 }
+fn event_schema(){
+    return {type: "object" required: ["found" "title" "start" "end" "location"] additionalProperties: false
+        properties: {
+            found: {type: "string" enum: ["yes" "no"]}
+            title: {type: "string" maxLength: 200}
+            start: {type: "string" maxLength: 80}
+            end: {type: "string" maxLength: 80}
+            location: {type: "string" maxLength: 200}
+        }}
+}
 fn translate_schema(){
     return {type: "object" required: ["status" "subject" "text"] additionalProperties: false
         properties: {
@@ -627,6 +644,99 @@ fn save_tools(){
     }
     fs.write("tools.txt", text)
 }
+fn load_events(){
+    saved_events = []
+    if !fs.exists("events.txt") { return }
+    let lines = fs.read("events.txt").split("\n")
+    for line in lines {
+        if line == "" { continue }
+        let bits = line.split("|")
+        if bits.len() >= 4 {
+            let key = ""
+            if bits.len() >= 5 { key = unpack(bits[4]) }
+            saved_events.push({title: unpack(bits[0]) start: unpack(bits[1]) end: unpack(bits[2]) location: unpack(bits[3]) key: key})
+        }
+    }
+}
+fn save_events(){
+    let text = ""
+    for e in saved_events {
+        if text != "" { text = text + "\n" }
+        text = text + pack(e.title) + "|" + pack(e.start) + "|" + pack(e.end) + "|" + pack(e.location) + "|" + pack(e.key)
+    }
+    fs.write("events.txt", text)
+}
+fn event_brief(){
+    if pending_event == nil { return "" }
+    let place = pending_event.location
+    if place == nil { place = "" }
+    return pending_event.title + " | " + pending_event.start + " – " + pending_event.end + " | " + place
+}
+fn event_saved(title, start){
+    for e in saved_events {
+        if e.title == title && e.start == start { return true }
+    }
+    return false
+}
+fn commit_event(){
+    if pending_event == nil { return "There is no schedule waiting." }
+    let title = pending_event.title
+    let start = pending_event.start
+    let end = pending_event.end
+    let location = pending_event.location
+    let key = pending_event.key
+    if key == nil { key = "" }
+    if location == nil { location = "" }
+    let shown = title + "\n" + start + " – " + end
+    if location != "" { shown = shown + "\n" + location }
+    if event_saved(title, start) {
+        pending_event = nil
+        return "Already on the calendar.\n" + shown
+    }
+    saved_events.push({title: title start: start end: end location: location key: key})
+    save_events()
+    pending_event = nil
+    return "Added to the calendar.\n" + shown
+}
+fn agrees(text){
+    let t = text.trim()
+    if t == "要" || t == "要的" || t == "是" || t == "好" || t == "好的" || t == "可以" || t == "加入" || t == "添加" || t == "要添加" { return true }
+    if t == "yes" || t == "Yes" || t == "YES" || t == "y" || t == "Y" || t == "ok" || t == "OK" || t == "okay" || t == "Okay" || t == "add" || t == "Add" { return true }
+    return false
+}
+fn declines(text){
+    let t = text.trim()
+    if t == "不要" || t == "不用" || t == "否" || t == "取消" { return true }
+    if t == "no" || t == "No" || t == "NO" || t == "cancel" || t == "Cancel" { return true }
+    return false
+}
+fn at_tail(){
+    let y = try { ui.chat_view.scroll_y() } catch { -1 }
+    if y < 0 { return true }
+    let max = try { ui.chat_view.scroll_max_y() } catch { -1 }
+    if max < 0 { return true }
+    if max <= 12 { return true }
+    return y + 36 >= max
+}
+fn paint_chat(){
+    if !follow_locked {
+        chat_follow = at_tail()
+        follow_locked = true
+        start_timeout(0.4, || { follow_locked = false })
+    }
+    ui.chat_view.render()
+    follow_gen = follow_gen + 1
+    if !chat_follow { return }
+    let token = follow_gen
+    start_timeout(0.15, || {
+        if token != follow_gen { return }
+        try { ui.chat_view.set_scroll_y(1000000) } catch { 0 }
+        start_timeout(0.25, || {
+            if token != follow_gen { return }
+            try { ui.chat_view.set_scroll_y(1000000) } catch { 0 }
+        })
+    })
+}
 fn show_agent(){
     agent_open = true
     ui.agent_slim.set_visible(false)
@@ -745,7 +855,7 @@ fn restore_session(i){
     active_session = i
     history_open = false
     ui.history_pane.set_visible(false)
-    ui.chat_view.render()
+    paint_chat()
 }
 fn new_chat(){
     remember_session()
@@ -753,7 +863,7 @@ fn new_chat(){
     active_session = -1
     history_open = false
     ui.history_pane.set_visible(false)
-    ui.chat_view.render()
+    paint_chat()
 }
 fn toggle_history(){
     history_open = !history_open
@@ -795,7 +905,7 @@ fn mailbox_digest(list, title){
 fn history_text(){
     let t = ""
     let start = 0
-    if chat_log.len() > 8 { start = chat_log.len() - 8 }
+    if chat_log.len() > 16 { start = chat_log.len() - 16 }
     for i in chat_log.len() {
         if i >= start {
             let m = chat_log[i]
@@ -823,7 +933,7 @@ fn finish_turn(text){
     ui.agent_note.set_text("")
     chat_log.push({role: "agent" text: text})
     remember_session()
-    ui.chat_view.render()
+    paint_chat()
 }
 fn open_hint(){
     if reading == nil { return "none" }
@@ -874,8 +984,8 @@ fn react_next(){
     react_step = react_step + 1
     ui.agent_note.set_text("Thinking…")
     host.request("model.complete", {
-        task: "You are AgentMail in a ReAct loop. The language field is the person's chosen language. Write answer in that language. Write any email subject and body you put in subject and body in that language too. Current screen: the value of screen. You can open the mail list, one message, the reply composer, or the new-message composer. tools is a comma-separated list run in order, or empty. Tools: read_message, read_mailbox, read_range, summarize, translate, show_original, open_reply, open_compose, write_reply, write_mail, open_mail, classify, classify_more. classify sorts the latest 100 messages into the account's existing folders, and only when the user asks. classify_more does the next 100, and only when the user asks for more. Never classify on your own. For write_reply and write_mail put the draft in to, subject, and body. For open_mail put words from the subject or sender in query. since, until, and span are only for read_range. After you see an observation, you may return another list. Set stop to Finish or 结束 only when answer is the reply for the user. Do not put Finish inside answer."
-        input: {question: pending_q screen: screen_now() open: open_hint() language: target_lang history: clip(history_text(), 1200) observations: clip(react_trace, 6000) step: react_step}
+        task: "You are AgentMail in a ReAct loop. The language field is the person's chosen language. Write answer in that language. Write any email subject and body you put in subject and body in that language too. Current screen: the value of screen. You can open the mail list, one message, the reply composer, or the new-message composer. tools is a comma-separated list run in order, or empty. Tools: read_message, read_mailbox, read_range, summarize, translate, show_original, find_event, add_event, open_reply, open_compose, write_reply, write_mail, open_mail, classify, classify_more. classify sorts the latest 100 messages into the account's existing folders, and only when the user asks. classify_more does the next 100, and only when the user asks for more. Never classify on your own. find_event reads a schedule from the open mail. add_event writes the schedule already in the pending field, and only after the user has agreed in their own later message. When the question is Recognize, call summarize then find_event before Finish. If a schedule was found, the answer must show its title, start, end, and location, then ask whether to add it. Do not call add_event during Recognize. When the user agrees, call add_event. History is the earlier chat. Use it, and use pending, so you know which schedule they mean. For write_reply and write_mail put the draft in to, subject, and body. For open_mail put words from the subject or sender in query. since, until, and span are only for read_range. After you see an observation, you may return another list. Set stop to Finish or 结束 only when answer is the reply for the user. Do not put Finish inside answer."
+        input: {question: pending_q screen: screen_now() open: open_hint() language: target_lang history: clip(history_text(), 4000) pending: event_brief() observations: clip(react_trace, 6000) step: react_step}
         schema: plan_schema()
         class: "fast"
         allow_urls: true
@@ -910,6 +1020,10 @@ fn react_next(){
             if r.data.output.answer != nil { answer = r.data.output.answer }
         }
         if is_stop(stop) {
+            if pending_q == "Recognize" && react_step < 4 && react_trace.search("Schedule found") < 0 && react_trace.search("No schedule") < 0 {
+                observe("Recognize is not finished. Call summarize, then find_event. Do not add the event yet.")
+                return
+            }
             let shown = clean_answer(answer)
             if shown == "" { shown = "Done." }
             finish_turn(shown)
@@ -982,6 +1096,52 @@ fn tool_summarize(){
         if r.is_ok { remember_sum(key, text); save_tools(); paint_mail() }
         finish_tool(text)
     })
+}
+fn tool_find_event(){
+    if reading == nil { pending_event = nil; finish_tool("No schedule. No message is open."); return }
+    if react_step >= 10 { finish_tool("Step limit reached before the schedule check."); return }
+    react_step = react_step + 1
+    ui.agent_note.set_text("Thinking…")
+    let key = mail_key()
+    host.request("model.complete", {
+        task: "Decide whether this email contains one calendar event, such as a meeting, appointment, delivery window, flight, reservation, or a deadline that has a date or a time. If it does, set found to yes and copy the title, start, end, and location from the mail. Keep the dates and times that are written in the mail. If an end is missing, leave end empty. If there is no schedule, set found to no and leave the other fields empty. Do not invent a time or a place."
+        input: {subject: reading.subject from: reading.sender body: clip(strip_tags(reading.body), 6000)}
+        schema: event_schema()
+        class: "fast"
+        allow_urls: true
+    }, fn(r){
+        if !r.is_ok { pending_event = nil; finish_tool(r.error); return }
+        let found = "no"
+        let title = ""
+        let start = ""
+        let end = ""
+        let location = ""
+        if r.data != nil && r.data.output != nil {
+            if r.data.output.found != nil { found = r.data.output.found }
+            if r.data.output.title != nil { title = r.data.output.title }
+            if r.data.output.start != nil { start = r.data.output.start }
+            if r.data.output.end != nil { end = r.data.output.end }
+            if r.data.output.location != nil { location = r.data.output.location }
+        }
+        if found != "yes" || title == "" || start == "" {
+            pending_event = nil
+            finish_tool("No schedule in this mail.")
+            return
+        }
+        pending_event = {title: title start: start end: end location: location key: key}
+        finish_tool("Schedule found. Title: " + title + ". Start: " + start + ". End: " + end + ". Location: " + location + ". Show these fields and ask whether to add the event. Do not add it yet.")
+    })
+}
+fn tool_add_event(){
+    if !turn_can_add {
+        finish_tool("Refused: the user has not agreed yet. Show the schedule and ask. Do not add it during Recognize.")
+        return
+    }
+    if pending_event == nil {
+        finish_tool("No schedule is waiting. Use the chat history and call find_event on the open mail before adding.")
+        return
+    }
+    finish_tool(commit_event())
 }
 fn tool_translate(){
     if reading == nil { finish_tool("No message is open, so it was not translated."); return }
@@ -1173,7 +1333,7 @@ fn ask_draft(idea){
     react_trace = ""
     in_chain = false
     chat_log.push({role: "user" text: idea})
-    ui.chat_view.render()
+    paint_chat()
     agent_busy = true
     ui.agent_note.set_text("Thinking…")
     let mail = ""
@@ -1193,6 +1353,8 @@ fn ask_draft(idea){
 }
 fn dispatch(tool, since, until, span){
     if tool == "summarize" { tool_summarize(); return }
+    if tool == "find_event" { tool_find_event(); return }
+    if tool == "add_event" { tool_add_event(); return }
     if tool == "translate" { tool_translate(); return }
     if tool == "show_original" { tool_show_original(); return }
     if tool == "read_mailbox" { tool_read_mailbox(); return }
@@ -1215,11 +1377,12 @@ fn begin_tool(label){
     react_step = 0
     react_trace = ""
     in_chain = false
+    turn_can_add = false
     chat_log.push({role: "user" text: label})
-    ui.chat_view.render()
+    paint_chat()
     agent_busy = true
     if label == "Translate" { dispatch("translate", "", "", "") }
-    else { dispatch("summarize", "", "", "") }
+    else { react_next() }
 }
 fn click_translate(){
     if trans_busy { return }
@@ -1259,10 +1422,20 @@ fn ask_agent(text){
     react_step = 0
     react_trace = ""
     in_chain = false
+    turn_can_add = true
     chat_log.push({role: "user" text: q})
-    ui.chat_view.render()
-    agent_busy = true
+    paint_chat()
     show_agent()
+    if pending_event != nil && agrees(q) {
+        finish_turn(commit_event())
+        return
+    }
+    if pending_event != nil && declines(q) {
+        pending_event = nil
+        finish_turn("Not added.")
+        return
+    }
+    agent_busy = true
     react_next()
 }
 
