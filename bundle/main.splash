@@ -22,6 +22,7 @@ let settings_tab = "account"
 let pending_remove = ""
 let chat_log = []
 let pending_q = ""
+let pending_input = ""
 let history_open = false
 let sessions = []
 let active_session = -1
@@ -1064,22 +1065,29 @@ fn tool_open_compose(){
     finish_tool("Opened the new-message composer.")
 }
 fn tool_write_reply(){
-    if !ui.composer.visible() || compose_kind != "reply" {
-        if reading == nil { finish_tool("No message is open to reply to."); return }
-        let subject = reading.subject
-        if subject.search("Re:") != 0 { subject = "Re: " + subject }
-        if arg_subject != "" { subject = arg_subject }
-        let to = reading.address
-        if arg_to != "" { to = arg_to }
-        compose_kind = "reply"
-        compose(to, subject, arg_body)
-        finish_tool("Opened the reply composer and wrote the draft.")
+    if arg_body == "" {
+        finish_tool("Refused: the reply body was empty. Put the full reply text in body and call write_reply again. Do not finish yet.")
         return
     }
-    if arg_to != "" { ui.c_to.set_text(arg_to) }
-    if arg_subject != "" { ui.c_subject.set_text(arg_subject) }
-    if arg_body != "" { ui.c_body.set_text(arg_body) }
-    finish_tool("Wrote the draft into the reply.")
+    if reading == nil && compose_kind != "reply" { finish_tool("No message is open to reply to."); return }
+    let subject = ""
+    let to = ""
+    if reading != nil {
+        subject = reading.subject
+        if subject.search("Re:") != 0 { subject = "Re: " + subject }
+        to = reading.address
+    }
+    if arg_subject != "" { subject = arg_subject }
+    if arg_to != "" { to = arg_to }
+    compose_kind = "reply"
+    if !ui.composer.visible() || ui.c_body.text() == "" {
+        compose(to, subject, arg_body)
+    } else {
+        if to != "" { ui.c_to.set_text(to) }
+        if subject != "" { ui.c_subject.set_text(subject) }
+        ui.c_body.set_text(arg_body)
+    }
+    finish_tool("Wrote the reply body into the composer.")
 }
 fn tool_write_mail(){
     if !ui.composer.visible() || compose_kind != "new" {
@@ -1152,17 +1160,36 @@ fn send_draft_idea(){
 }
 fn ask_draft(idea){
     if agent_busy || account == nil { return }
+    if compose_kind == "reply" || ui.reader.visible() {
+        if reading == nil { ui.agent_note.set_text("Open a message first."); return }
+        let subject = reading.subject
+        if subject.search("Re:") != 0 { subject = "Re: " + subject }
+        compose_kind = "reply"
+        if !ui.composer.visible() { compose(reading.address, subject, "") }
+    }
     show_agent()
-    let q = "Write a new email in the composer in " + target_lang + ". The user's note: " + idea
-    if compose_kind == "reply" || ui.reader.visible() { q = "Write a reply to the open message in " + target_lang + " and put it in the reply composer. The user's note: " + idea }
-    pending_q = q
+    pending_q = idea
     react_step = 0
     react_trace = ""
     in_chain = false
     chat_log.push({role: "user" text: idea})
     ui.chat_view.render()
     agent_busy = true
-    react_next()
+    ui.agent_note.set_text("Thinking…")
+    let mail = ""
+    if reading != nil { mail = message_context() }
+    host.request("model.complete", {
+        task: "Write only the email body in " + target_lang + ". If the note is Let AI decide, write a suitable message from the mail context. Do not include a subject line. Put the body in answer."
+        input: {note: idea mail: clip(mail, 6000)}
+        schema: answer_schema()
+        class: "fast"
+        allow_urls: true
+    }, fn(r){
+        if !r.is_ok { finish_turn(r.error); return }
+        let text = take_answer(r)
+        ui.c_body.set_text(text)
+        finish_turn(text)
+    })
 }
 fn dispatch(tool, since, until, span){
     if tool == "summarize" { tool_summarize(); return }
@@ -1216,10 +1243,17 @@ fn click_translate(){
 fn click_recognize(){
     begin_tool("Recognize")
 }
-fn ask_agent(){
-    if agent_busy || account == nil { return }
-    let q = ui.agent_input.text().trim()
+fn ask_agent(text){
+    if agent_busy { ui.agent_note.set_text("Still working…"); return }
+    if account == nil { ui.agent_note.set_text("Add an account first."); return }
+    let q = pending_input.trim()
+    if text != nil {
+        let given = ("" + text).trim()
+        if given != "" { q = given }
+    }
+    if q == "" { q = ui.agent_input.text().trim() }
     if q == "" { return }
+    pending_input = ""
     ui.agent_input.set_text("")
     pending_q = q
     react_step = 0
@@ -1230,22 +1264,6 @@ fn ask_agent(){
     agent_busy = true
     show_agent()
     react_next()
-}
-fn use_draft(){
-    let text = ""
-    for m in chat_log { if m.role == "agent" { text = m.text } }
-    if text == "" { ui.agent_note.set_text("Ask a question first."); return }
-    let to = ""
-    let subject = ""
-    if reading != nil {
-        to = reading.address
-        subject = reading.subject
-        if subject.search("Re:") != 0 { subject = "Re: " + subject }
-        compose_kind = "reply"
-    } else {
-        compose_kind = "new"
-    }
-    compose(to, subject, text)
 }
 
 start_timeout(0.05, || { load_accounts(); load_prefs() })
@@ -1587,15 +1605,13 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
                     }
                 }}
                 agent_note := Label{width: Fill text: "" draw_text.color: secondary draw_text.text_style.font_size: 12}
-                agent_input := TextInput{width: Fill height: 40 empty_text: "Ask" on_return: |text| ask_agent()
-                    draw_bg +: {color: #xffffff color_hover: #xffffff color_focus: #xffffff color_empty: #xffffff
-                        border_color: #xe5e5ea border_color_hover: #xe5e5ea border_color_focus: accent border_color_empty: #xe5e5ea border_radius: 10.0}
-                    draw_text +: {color: ink color_hover: ink color_focus: ink color_empty: secondary color_empty_hover: secondary}
-                }
-                View{width: Fill height: Fit flow: Right
-                    Bar{text: "Ask" on_click: || ask_agent()}
-                    View{width: Fill height: 1}
-                    Bar{text: "Use as draft" on_click: || use_draft()}
+                View{width: Fill height: Fit flow: Right align: Align{y: 0.5} spacing: 4
+                    agent_input := TextInput{width: Fill height: 40 empty_text: "Ask" on_change: |text| pending_input = text on_return: |text| ask_agent(text)
+                        draw_bg +: {color: #xffffff color_hover: #xffffff color_focus: #ffffff color_empty: #xffffff
+                            border_color: #xe5e5ea border_color_hover: #xe5e5ea border_color_focus: accent border_color_empty: #xe5e5ea border_radius: 10.0}
+                        draw_text +: {color: ink color_hover: ink color_focus: ink color_empty: secondary color_empty_hover: secondary}
+                    }
+                    Bar{text: "Send" height: 40 padding: Inset{left: 6 right: 0} on_click: || ask_agent("")}
                 }
                     }
                     history_pane := SolidView{visible: false width: Fill height: Fill flow: Down spacing: 8 draw_bg.color: #xfafafa
