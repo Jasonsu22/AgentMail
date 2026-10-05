@@ -41,6 +41,7 @@ fn show_composer(){
     ui.confirm.set_visible(false)
 }
 fn close_detail(){
+    commit_rename()
     reading = nil
     open_id = ""
     pending_remove = ""
@@ -54,10 +55,16 @@ fn toggle_rail(){
     rail_open = !rail_open
     ui.rail_slot.render()
 }
+fn local_part(address){
+    if address == nil { return "" }
+    let bits = address.split("@")
+    if bits.len() > 0 && bits[0] != "" { return bits[0] }
+    return address
+}
 fn display_name(a){
     let custom = names[a.id]
     if custom != nil && custom != "" { return custom }
-    return a.address
+    return local_part(a.address)
 }
 fn load_prefs(){
     if fs.exists("names.txt") {
@@ -85,9 +92,8 @@ fn begin_rename(id){
     for a in accounts {
         if a.id == id { rename_text = display_name(a) }
     }
-    ui.rename_catch.set_visible(true)
-    ui.agent_catch.set_visible(true)
     ui.rail_slot.render()
+    ui.settings_accounts.render()
 }
 fn commit_rename(){
     if renaming == "" { return }
@@ -98,9 +104,8 @@ fn finish_rename(id, text){
     renaming = ""
     rename_text = ""
     save_names()
-    ui.rename_catch.set_visible(false)
-    ui.agent_catch.set_visible(false)
     ui.rail_slot.render()
+    ui.settings_accounts.render()
 }
 fn is_open(id){
     if open_by[id] == nil { return true }
@@ -255,6 +260,7 @@ fn remove_account(id){
     })
 }
 fn ask_remove(a){
+    commit_rename()
     pending_remove = a.id
     ui.confirm_name.set_text(display_name(a))
     ui.confirm.set_visible(true)
@@ -270,6 +276,7 @@ fn confirm_remove(){
     remove_account(id)
 }
 fn show_tab(name){
+    commit_rename()
     settings_tab = name
     ui.account_tab.set_visible(name == "account")
     ui.agent_tab.set_visible(name == "agent")
@@ -484,19 +491,11 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
                             for a in accounts {
                                 let glyph = "▸"
                                 if is_open(a.id) { glyph = "▾" }
-                                if renaming == a.id {
-                                    TextInput{width: Fill height: 34 text: rename_text empty_text: "Name" on_change: |text| rename_text = text on_return: |text| finish_rename(a.id, text)
-                                        draw_bg +: {color: #xffffff border_radius: 6.0}
-                                        draw_text +: {color: ink text_style +: {font_size: 13}}}
-                                } else {
-                                    GestureView{width: Fill height: Fit flow: Right align: Align{y: 0.0} padding: Inset{left: 4 right: 8 top: 8 bottom: 8} spacing: 4
-                                        GestureView{width: 28 height: 22 align: Align{x: 0.5 y: 0.0} on_tap: |x, y| toggle_account(a.id)
-                                            Label{text: glyph align: Align{x: 0.5} draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 13}}
-                                        }
-                                        GestureView{width: Fill height: Fit on_double_tap: |x, y| begin_rename(a.id)
-                                            Label{width: Fill text: display_name(a) draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 13}}
-                                        }
+                                GestureView{width: Fill height: Fit flow: Right align: Align{y: 0.0} padding: Inset{left: 4 right: 8 top: 8 bottom: 8} spacing: 4
+                                    GestureView{width: 28 height: 22 align: Align{x: 0.5 y: 0.0} on_tap: |x, y| toggle_account(a.id)
+                                        Label{text: glyph align: Align{x: 0.5} draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 13}}
                                     }
+                                    Label{width: Fill text: display_name(a) max_lines: 1 draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 13}}
                                 }
                                 if is_open(a.id) {
                                     let found = folders_by[a.id]
@@ -627,19 +626,35 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
                     Bar{text: "Agent" on_click: || show_tab("agent")}
                 }
                 account_tab := View{width: Fill height: Fill flow: Down spacing: 8
-                    settings_accounts := ScrollYView{width: Fill height: Fill flow: Down spacing: 4 on_render: || {
+                    settings_accounts := ScrollYView{width: Fill height: Fill flow: Down spacing: 0 on_render: || {
                         if accounts.len() == 0 {
                             Label{text: "No accounts yet." draw_text.color: secondary draw_text.text_style.font_size: 13}
                         }
                         for a in accounts {
-                            View{width: Fill height: Fit flow: Right align: Align{y: 0.5} padding: Inset{top: 8 bottom: 8}
-                                Label{width: Fill text: display_name(a) draw_text.color: ink draw_text.text_style.font_size: 15}
-                                ButtonFlat{text: "Remove" height: 32 padding: Inset{left: 12 right: 12} on_click: || ask_remove(a)
-                                    draw_bg +: {color: #x00000000 color_hover: #x0000000a color_down: #x00000014 border_size: 0.0}
-                                    draw_text +: {color: #xff3b30 color_hover: #xff3b30 color_down: #xff3b30 text_style +: {font_size: 14}}}
+                            View{width: Fill height: Fit flow: Down spacing: 0
+                                View{width: Fill height: Fit flow: Right align: Align{y: 0.0} padding: Inset{top: 8 bottom: 2} spacing: 8
+                                    View{width: Fill height: Fit flow: Down spacing: 2
+                                        if renaming == a.id {
+                                            TextInput{width: Fill height: 34 text: rename_text empty_text: "Name" on_change: |text| rename_text = text on_return: |text| finish_rename(a.id, text)
+                                                draw_bg +: {color: #xf2f2f7 border_radius: 6.0}
+                                                draw_text +: {color: ink text_style +: {font_size: 15}}}
+                                        } else {
+                                            GestureView{width: Fill height: Fit on_double_tap: |x, y| begin_rename(a.id)
+                                                Label{width: Fill text: display_name(a) max_lines: 1 draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 16}}
+                                            }
+                                        }
+                                        GestureView{width: Fill height: Fit on_tap: |x, y| commit_rename()
+                                            Label{width: Fill text: a.address max_lines: 1 draw_text.color: secondary draw_text.text_style.font_size: 12}
+                                        }
+                                    }
+                                    ButtonFlat{text: "Remove" height: 32 padding: Inset{left: 12 right: 12} on_click: || ask_remove(a)
+                                        draw_bg +: {color: #x00000000 color_hover: #x0000000a color_down: #x00000014 border_size: 0.0}
+                                        draw_text +: {color: #xff3b30 color_hover: #xff3b30 color_down: #xff3b30 text_style +: {font_size: 14}}}
+                                }
+                                SolidView{width: Fill height: 1 draw_bg.color: #xe5e5ea}
                             }
-                            Hr{}
                         }
+                        GestureView{width: Fill height: Fill on_tap: |x, y| commit_rename()}
                     }}
                 }
                 agent_tab := View{visible: false width: Fill height: Fill flow: Down spacing: 10
