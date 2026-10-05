@@ -6,6 +6,10 @@ let open_id = ""
 let reading = nil
 let busy = false
 let folder = {id: "INBOX" name: "Inbox"}
+let recent = []
+let classes = {}
+let classify_goal = 100
+let classifying = false
 let folders_by = {}
 let open_by = {}
 let names = {}
@@ -13,11 +17,41 @@ let renaming = ""
 let rename_text = ""
 let rail_open = true
 let agent_open = false
-let agent_scope = "message"
 let agent_busy = false
 let settings_tab = "account"
 let pending_remove = ""
 let chat_log = []
+let pending_q = ""
+let history_open = false
+let sessions = []
+let active_session = -1
+let compose_kind = "new"
+let arg_to = ""
+let arg_subject = ""
+let arg_body = ""
+let arg_query = ""
+let arg_since = ""
+let arg_until = ""
+let arg_span = ""
+let in_chain = false
+let react_step = 0
+let react_trace = ""
+let chain_names = []
+let chain_i = 0
+let chain_log = ""
+let target_lang = "中文"
+let lang_open = false
+let lang_is_other = false
+let custom_lang = ""
+let lang_labels = ["English" "中文" "Español" "Français" "Deutsch" "日本語" "한국어" "Português" "Italiano" "Русский" "العربية" "हिन्दी" "Türkçe" "Tiếng Việt" "Bahasa Indonesia" "ไทย" "Nederlands" "Polski" "Other"]
+let trans_busy = false
+let view_trans = {}
+let saved_sum = {}
+let saved_trans = {}
+let saved_subject = {}
+let saved_trans_lang = {}
+let sum_keys = []
+let trans_keys = []
 
 fn status(text){ ui.status.set_text(text) }
 fn pane(name){
@@ -25,13 +59,12 @@ fn pane(name){
     ui.inbox.set_visible(name == "inbox")
 }
 fn show_reader(){
-    ui.r_ai.set_visible(false)
-    ui.r_ai.set_text("")
     ui.list_pane.set_visible(false)
     ui.reader.set_visible(true)
     ui.composer.set_visible(false)
     ui.settings_pane.set_visible(false)
     ui.confirm.set_visible(false)
+    paint_mail()
 }
 fn show_composer(){
     ui.list_pane.set_visible(false)
@@ -67,6 +100,9 @@ fn display_name(a){
     return local_part(a.address)
 }
 fn load_prefs(){
+    load_chats()
+    load_tools()
+    load_classes()
     if fs.exists("names.txt") {
         let lines = fs.read("names.txt").split("\n")
         for line in lines {
@@ -74,6 +110,10 @@ fn load_prefs(){
             if bits.len() >= 2 && bits[0] != "" { names[bits[0]] = bits[1] }
         }
     }
+    refresh_lang_face()
+    ui.lang_menu.set_visible(false)
+    ui.lang_custom.set_visible(lang_is_other)
+    if lang_is_other { ui.custom_field.set_text(custom_lang) }
 }
 fn save_names(){
     let text = ""
@@ -169,16 +209,21 @@ fn load_folders(id){
         }
     })
 }
-fn select_folder(a, f){
-    account = a
-    folder = f
+fn select_named(aid, fid, fname){
+    for a in accounts {
+        if a.id == aid { account = a }
+    }
+    folder = {id: fid name: fname}
     messages = []
     close_detail()
     show_heading()
     ui.rail_slot.render()
-    ui.rows.render()
+    paint_rows()
     list()
     sync()
+}
+fn select_folder(a, f){
+    select_named(a.id, f.id, f.name)
 }
 fn sync(){
     if account == nil || busy { return }
@@ -194,14 +239,118 @@ fn sync(){
         } else { status(r.error) }
     })
 }
+fn load_classes(){
+    classes = {}
+    if !fs.exists("classes.txt") { return }
+    let lines = fs.read("classes.txt").split("\n")
+    for line in lines {
+        let bits = line.split("|")
+        if bits.len() >= 2 && bits[0] != "" { classes[bits[0]] = bits[1] }
+    }
+}
+fn save_classes(){
+    let text = ""
+    for m in recent {
+        let c = classes[m.id]
+        if c != nil && c != "" {
+            if text != "" { text = text + "\n" }
+            text = text + m.id + "|" + c
+        }
+    }
+    fs.write("classes.txt", text)
+}
+fn folder_names(){
+    if account == nil { return "" }
+    let found = folders_by[account.id]
+    if found == nil { return "" }
+    let t = ""
+    for f in found {
+        if t != "" { t = t + ", " }
+        t = t + f.name
+    }
+    return t
+}
+fn name_ok(name){
+    if account == nil { return false }
+    let found = folders_by[account.id]
+    if found == nil { return false }
+    for f in found { if f.name == name { return true } }
+    return false
+}
+fn paint_rows(){
+    total = messages.len()
+    show_heading()
+    if messages.len() == 0 {
+        ui.rows.set_visible(false)
+        ui.rows_empty.set_visible(true)
+    } else {
+        ui.rows_empty.set_visible(false)
+        ui.rows.set_visible(true)
+        ui.rows.render()
+    }
+    status(folder.name + " · " + messages.len())
+}
+fn show_current(raw){
+    messages = raw
+    paint_rows()
+}
+fn classify_some(){
+    if classifying || account == nil { return }
+    if folder_names() == "" { return }
+    let pending = []
+    let i = 0
+    for m in recent {
+        if i < classify_goal {
+            if classes[m.id] == nil || classes[m.id] == "" { pending.push(m) }
+        }
+        i = i + 1
+    }
+    if pending.len() == 0 { show_current(messages); return }
+    let n = pending.len()
+    if n > 20 { n = 20 }
+    let batch = ""
+    for i in n {
+        let m = pending[i]
+        batch = batch + m.id + " | " + m.sender + " | " + m.subject + "\n"
+    }
+    let allowed = folder_names()
+    classifying = true
+    status("Classifying the latest mail…")
+    host.request("model.complete", {
+        task: "Classify each email into one existing mailbox folder. For every line, reply with one line id|Folder. Folder must be copied exactly from the allowed list. Do not invent a folder name. Return every id. No other text."
+        input: {allowed: allowed mail: batch}
+        schema: answer_schema()
+        class: "fast"
+    }, fn(r){
+        classifying = false
+        let got = 0
+        if r.is_ok && r.data != nil && r.data.output != nil && r.data.output.answer != nil {
+            let lines = r.data.output.answer.split("\n")
+            for line in lines {
+                let bits = line.split("|")
+                if bits.len() >= 2 && name_ok(bits[1].trim()) {
+                    classes[bits[0].trim()] = bits[1].trim()
+                    got = got + 1
+                }
+            }
+            save_classes()
+        }
+        show_current(messages)
+        if got > 0 { classify_some() }
+    })
+}
 fn list(){
     if account == nil { return }
-    host.request("mail.list", {account: account.id folder: folder.id offset: 0 limit: 100}, fn(r){
-        if r.is_ok {
-            messages = r.data.messages
-            total = r.data.total
-            ui.rows.render()
-        } else { status(r.error) }
+    let wanted = "" + folder.id
+    let wanted_name = "" + folder.name
+    host.request("mail.list", {account: account.id folder: wanted offset: 0 limit: 100}, fn(r){
+        if ("" + folder.id) != wanted { return }
+        if !r.is_ok { status(r.error); return }
+        if r.data != nil && r.data.folder != nil && ("" + r.data.folder) != wanted { return }
+        let raw = []
+        if r.data != nil && r.data.messages != nil { raw = r.data.messages }
+        if wanted == "INBOX" || wanted_name == "Inbox" { recent = raw }
+        show_current(raw)
     })
 }
 fn open_message(m){
@@ -244,7 +393,8 @@ fn reply(){
     if reading == nil { return }
     let subject = reading.subject
     if subject.search("Re:") != 0 { subject = "Re: " + subject }
-    compose(reading.address, subject, "\n\n> " + reading.body.replace("\n", "\n> "))
+    compose_kind = "reply"
+    compose(reading.address, subject, "")
 }
 fn send(){
     if account == nil { return }
@@ -334,10 +484,280 @@ fn refresh_provider(){
         else { ui.api_status.set_text(s.error) }
     })
 }
-fn set_scope(name){
-    agent_scope = name
-    if name == "mailbox" { ui.scope_note.set_text("Inbox already on this device") }
-    else { ui.scope_note.set_text("The open message") }
+fn plan_schema(){
+    return {type: "object" required: ["stop" "tools" "since" "until" "span" "to" "subject" "body" "query" "answer"] additionalProperties: false
+        properties: {
+            stop: {type: "string" enum: ["continue" "Finish" "结束"]}
+            tools: {type: "string" maxLength: 240}
+            since: {type: "string" maxLength: 40}
+            until: {type: "string" maxLength: 40}
+            span: {type: "string" maxLength: 80}
+            to: {type: "string" maxLength: 200}
+            subject: {type: "string" maxLength: 300}
+            body: {type: "string" maxLength: 4000}
+            query: {type: "string" maxLength: 120}
+            answer: {type: "string" maxLength: 4000}
+        }}
+}
+fn translate_schema(){
+    return {type: "object" required: ["status" "subject" "text"] additionalProperties: false
+        properties: {
+            status: {type: "string" enum: ["translated" "already"]}
+            subject: {type: "string" maxLength: 300}
+            text: {type: "string" maxLength: 8000}
+        }}
+}
+fn pack(text){
+    if text == nil { return "" }
+    let parts = text.split("\n")
+    let out = ""
+    for p in parts {
+        let clean = p.replace("|", "/")
+        if out != "" { out = out + "¬" }
+        out = out + clean
+    }
+    return out
+}
+fn unpack(text){
+    if text == nil { return "" }
+    let parts = text.split("¬")
+    let out = ""
+    for p in parts {
+        if out != "" { out = out + "\n" }
+        out = out + p
+    }
+    return out
+}
+fn mail_key(){
+    if reading == nil || account == nil { return "" }
+    return account.id + "~" + folder.id + "~" + reading.id
+}
+fn remember_sum(key, text){
+    saved_sum[key] = text
+    let found = false
+    for k in sum_keys { if k == key { found = true } }
+    if !found { sum_keys.push(key) }
+}
+fn remember_trans(key, lang, subject, text){
+    saved_trans[key] = text
+    saved_subject[key] = subject
+    saved_trans_lang[key] = lang
+    let found = false
+    for k in trans_keys { if k == key { found = true } }
+    if !found { trans_keys.push(key) }
+}
+fn load_tools(){
+    if fs.exists("lang.txt") {
+        let line = fs.read("lang.txt").trim()
+        let other = line.strip_prefix("other|")
+        if other != line {
+            lang_is_other = true
+            custom_lang = other
+            if other != "" { target_lang = other }
+        } else if line != "" {
+            lang_is_other = false
+            target_lang = line
+        }
+    }
+    if !fs.exists("tools.txt") { return }
+    let lines = fs.read("tools.txt").split("\n")
+    for line in lines {
+        if line.search("S|") == 0 {
+            let bits = line.strip_prefix("S|").split("|")
+            if bits.len() >= 2 { remember_sum(bits[0], unpack(bits[1])) }
+        }
+        if line.search("T|") == 0 {
+            let bits = line.strip_prefix("T|").split("|")
+            if bits.len() >= 4 { remember_trans(bits[0], bits[1], unpack(bits[2]), unpack(bits[3])) }
+        }
+    }
+}
+fn refresh_lang_face(){
+    let shown = target_lang
+    if lang_is_other { shown = "Other" }
+    ui.lang_name.set_text(shown)
+    if lang_open { ui.lang_mark.set_text("▴") }
+    else { ui.lang_mark.set_text("▾") }
+}
+fn toggle_lang_menu(){
+    lang_open = !lang_open
+    ui.lang_menu.set_visible(lang_open)
+    refresh_lang_face()
+}
+fn pick_lang(i){
+    let name = lang_labels[i]
+    lang_open = false
+    ui.lang_menu.set_visible(false)
+    if name == "Other" {
+        lang_is_other = true
+        ui.lang_custom.set_visible(true)
+        if custom_lang != "" { target_lang = custom_lang }
+        fs.write("lang.txt", "other|" + custom_lang)
+    } else {
+        lang_is_other = false
+        ui.lang_custom.set_visible(false)
+        target_lang = name
+        fs.write("lang.txt", name)
+    }
+    refresh_lang_face()
+}
+fn save_custom(text){
+    custom_lang = text.trim()
+    if custom_lang != "" { target_lang = custom_lang }
+    fs.write("lang.txt", "other|" + custom_lang)
+}
+fn save_tools(){
+    let text = ""
+    for k in sum_keys {
+        if saved_sum[k] != nil {
+            if text != "" { text = text + "\n" }
+            text = text + "S|" + k + "|" + pack(saved_sum[k])
+        }
+    }
+    for k in trans_keys {
+        if saved_trans[k] != nil {
+            if text != "" { text = text + "\n" }
+            let lang = saved_trans_lang[k]
+            if lang == nil { lang = target_lang }
+            let sub = saved_subject[k]
+            if sub == nil { sub = "" }
+            text = text + "T|" + k + "|" + lang + "|" + pack(sub) + "|" + pack(saved_trans[k])
+        }
+    }
+    fs.write("tools.txt", text)
+}
+fn show_agent(){
+    agent_open = true
+    ui.agent_slim.set_visible(false)
+    ui.agent_panel.set_visible(true)
+}
+fn paint_mail(){
+    if reading == nil { return }
+    let key = mail_key()
+    if view_trans[key] == "1" && saved_trans[key] != nil && saved_trans_lang[key] == target_lang {
+        ui.r_html.set_text("")
+        ui.r_html.set_visible(false)
+        ui.r_body.set_visible(true)
+        ui.r_body.set_text(saved_trans[key])
+        if saved_subject[key] != nil && saved_subject[key] != "" { ui.r_subject.set_text(saved_subject[key]) }
+    } else {
+        ui.r_subject.set_text(reading.subject)
+        let formatted = reading.html != nil && reading.html != ""
+        ui.r_html.set_visible(formatted)
+        ui.r_body.set_visible(!formatted)
+        if formatted { ui.r_html.set_text(reading.html) }
+        else { ui.r_body.set_text(reading.body) }
+    }
+    let sum = saved_sum[key]
+    let has = sum != nil && sum != ""
+    ui.summary_rule.set_visible(has)
+    ui.r_summary.set_visible(has)
+    if has { ui.r_summary.set_text(sum) }
+    refresh_translate_btn()
+}
+fn refresh_translate_btn(){
+    let label = "Translate"
+    if trans_busy { label = "Translating…" }
+    else if reading != nil && view_trans[mail_key()] == "1" { label = "Show original" }
+    ui.translate_btn.set_text(label)
+}
+fn one_line(text){
+    if text == nil { return "" }
+    let parts = text.split("\n")
+    let out = ""
+    for p in parts {
+        if out != "" { out = out + " " }
+        out = out + p
+    }
+    return out
+}
+fn load_chats(){
+    sessions = []
+    if !fs.exists("chats.txt") { return }
+    let lines = fs.read("chats.txt").split("\n")
+    let title = ""
+    let body = ""
+    let open = false
+    for line in lines {
+        if line.search("@|") == 0 {
+            if open { sessions.push({title: title body: body}) }
+            let bits = line.split("|")
+            title = ""
+            if bits.len() >= 2 { title = bits[1] }
+            body = ""
+            open = true
+        } else if open && line != "" {
+            if body != "" { body = body + "\n" }
+            body = body + line
+        }
+    }
+    if open { sessions.push({title: title body: body}) }
+}
+fn save_chats(){
+    let text = ""
+    for s in sessions {
+        if text != "" { text = text + "\n" }
+        text = text + "@|" + one_line(s.title)
+        if s.body != "" { text = text + "\n" + s.body }
+    }
+    fs.write("chats.txt", text)
+}
+fn remember_session(){
+    if chat_log.len() == 0 { return }
+    let title = ""
+    for m in chat_log {
+        if title == "" && m.role == "user" { title = clip(m.text, 42) }
+    }
+    let body = ""
+    for m in chat_log {
+        let tag = "A|"
+        if m.role == "user" { tag = "U|" }
+        if body != "" { body = body + "\n" }
+        body = body + tag + one_line(m.text)
+    }
+    if active_session < 0 {
+        sessions.push({title: title body: body})
+        active_session = sessions.len() - 1
+    } else {
+        let next = []
+        for i in sessions.len() {
+            if i == active_session { next.push({title: title body: body}) }
+            else { next.push(sessions[i]) }
+        }
+        sessions = next
+    }
+    save_chats()
+}
+fn restore_session(i){
+    let s = sessions[i]
+    if s == nil { return }
+    chat_log = []
+    let lines = s.body.split("\n")
+    for line in lines {
+        let user = line.strip_prefix("U|")
+        if user != line { chat_log.push({role: "user" text: user}) }
+        else {
+            let agent = line.strip_prefix("A|")
+            if agent != line { chat_log.push({role: "agent" text: agent}) }
+        }
+    }
+    active_session = i
+    history_open = false
+    ui.history_pane.set_visible(false)
+    ui.chat_view.render()
+}
+fn new_chat(){
+    remember_session()
+    chat_log = []
+    active_session = -1
+    history_open = false
+    ui.history_pane.set_visible(false)
+    ui.chat_view.render()
+}
+fn toggle_history(){
+    history_open = !history_open
+    ui.history_pane.set_visible(history_open)
+    if history_open { ui.history_list.render() }
 }
 fn clip(text, n){
     if text == nil { return "" }
@@ -356,7 +776,7 @@ fn clip(text, n){
 }
 fn message_context(){
     if reading == nil { return "No message is open. Say that you cannot see a message." }
-    return "Subject: " + reading.subject + "\nFrom: " + reading.sender + " <" + reading.address + ">\nDate: " + reading.time + "\n\n" + clip(reading.body, 6000)
+    return "Subject: " + reading.subject + "\nFrom: " + reading.sender + " <" + reading.address + ">\nDate: " + reading.time + "\n\n" + clip(strip_tags(reading.body), 6000)
 }
 fn mailbox_digest(list, title){
     let t = "Account: " + account.address + "\n" + title + "\nThese are messages already on this device, not the full mailbox history.\n"
@@ -383,41 +803,433 @@ fn history_text(){
     }
     return t
 }
+fn pick_messages(list, since, until){
+    if since == "" && until == "" { return list }
+    let kept = []
+    for m in list {
+        let t = ""
+        if m.time != nil { t = m.time }
+        let hit = false
+        if since != "" && t.search(since) >= 0 { hit = true }
+        if until != "" && t.search(until) >= 0 { hit = true }
+        if hit { kept.push(m) }
+    }
+    if kept.len() == 0 { return list }
+    return kept
+}
 fn finish_turn(text){
     agent_busy = false
     ui.agent_note.set_text("")
     chat_log.push({role: "agent" text: text})
+    remember_session()
     ui.chat_view.render()
 }
-fn run_turn(context, question){
+fn open_hint(){
+    if reading == nil { return "none" }
+    return reading.subject + " | " + reading.time
+}
+fn clean_answer(text){
+    if text == nil { return "" }
+    let t = text.trim()
+    let a = t.strip_suffix("Finish")
+    if a != t { t = a.trim() }
+    let b = t.strip_suffix("结束")
+    if b != t { t = b.trim() }
+    return t
+}
+fn is_stop(stop){
+    return stop == "Finish" || stop == "结束"
+}
+fn strip_tags(text){
+    if text == nil { return "" }
+    return text.replace(regex("<[^>]+>", "g"), " ")
+}
+fn screen_now(){
+    if ui.composer.visible() {
+        if compose_kind == "reply" { return "reply composer" }
+        return "new message composer"
+    }
+    if ui.reader.visible() { return "open message" }
+    if ui.settings_pane.visible() { return "settings" }
+    return "mail list"
+}
+fn finish_tool(text){
+    if !in_chain { finish_turn(text); return }
+    if chain_log != "" { chain_log = chain_log + "\n" }
+    chain_log = chain_log + text
+    chain_i = chain_i + 1
+    run_chain()
+}
+fn observe(text){
+    if react_trace != "" { react_trace = react_trace + "\n" }
+    react_trace = react_trace + "Observation: " + clip(text, 2500)
+    react_next()
+}
+fn react_next(){
+    if react_step >= 10 {
+        finish_turn("Could not finish this request.")
+        return
+    }
+    react_step = react_step + 1
+    ui.agent_note.set_text("Thinking…")
     host.request("model.complete", {
-        task: "You are AgentMail. Answer using only the mail context. If it is not enough, say so. Do not invent messages. Reply in the user's language. Put the whole reply in answer."
-        input: {mail: clip(context, 8000) history: clip(history_text(), 2500) question: question}
+        task: "You are AgentMail in a ReAct loop. The language field is the person's chosen language. Write answer in that language. Write any email subject and body you put in subject and body in that language too. Current screen: the value of screen. You can open the mail list, one message, the reply composer, or the new-message composer. tools is a comma-separated list run in order, or empty. Tools: read_message, read_mailbox, read_range, summarize, translate, show_original, open_reply, open_compose, write_reply, write_mail, open_mail, classify, classify_more. classify sorts the latest 100 messages into the account's existing folders, and only when the user asks. classify_more does the next 100, and only when the user asks for more. Never classify on your own. For write_reply and write_mail put the draft in to, subject, and body. For open_mail put words from the subject or sender in query. since, until, and span are only for read_range. After you see an observation, you may return another list. Set stop to Finish or 结束 only when answer is the reply for the user. Do not put Finish inside answer."
+        input: {question: pending_q screen: screen_now() open: open_hint() language: target_lang history: clip(history_text(), 1200) observations: clip(react_trace, 6000) step: react_step}
+        schema: plan_schema()
+        class: "fast"
+        allow_urls: true
+    }, fn(r){
+        if !r.is_ok { finish_turn(r.error); return }
+        let stop = "continue"
+        let tools = ""
+        let since = ""
+        let until = ""
+        let span = ""
+        let answer = ""
+        arg_to = ""
+        arg_subject = ""
+        arg_body = ""
+        arg_query = ""
+        arg_since = ""
+        arg_until = ""
+        arg_span = ""
+        if r.data != nil && r.data.output != nil {
+            if r.data.output.stop != nil { stop = r.data.output.stop }
+            if r.data.output.tools != nil { tools = r.data.output.tools }
+            if r.data.output.since != nil { since = r.data.output.since }
+            if r.data.output.until != nil { until = r.data.output.until }
+            if r.data.output.span != nil { span = r.data.output.span }
+            arg_since = since
+            arg_until = until
+            arg_span = span
+            if r.data.output.to != nil { arg_to = r.data.output.to }
+            if r.data.output.subject != nil { arg_subject = r.data.output.subject }
+            if r.data.output.body != nil { arg_body = r.data.output.body }
+            if r.data.output.query != nil { arg_query = r.data.output.query }
+            if r.data.output.answer != nil { answer = r.data.output.answer }
+        }
+        if is_stop(stop) {
+            let shown = clean_answer(answer)
+            if shown == "" { shown = "Done." }
+            finish_turn(shown)
+            return
+        }
+        let names = []
+        if tools != nil && tools != "" { names = tools.split(",") }
+        if names.len() == 0 {
+            observe("No tool ran. Return a tool list, or set stop to Finish or 结束 when the answer is ready.")
+            return
+        }
+        in_chain = true
+        chain_names = names
+        chain_i = 0
+        chain_log = ""
+        run_chain()
+    })
+}
+fn after_plan(kind, since, until, span){
+    if kind == "message" && reading != nil {
+        finish_tool(message_context())
+        return
+    }
+    host.request("mail.list", {account: account.id folder: "INBOX" offset: 0 limit: 60}, fn(r){
+        let list = messages
+        if r.is_ok && r.data != nil && r.data.messages != nil { list = r.data.messages }
+        let title = "Inbox"
+        if kind == "range" {
+            list = pick_messages(list, since, until)
+            title = "Period " + span
+        }
+        finish_tool(mailbox_digest(list, title))
+    })
+}
+fn tool_read_message(){
+    if reading == nil { after_plan("mailbox", "", "", ""); return }
+    finish_tool(message_context())
+}
+fn tool_read_mailbox(){
+    after_plan("mailbox", "", "", "")
+}
+fn tool_read_range(since, until, span){
+    after_plan("range", since, until, span)
+}
+fn tool_show_original(){
+    if reading == nil { finish_tool("No message is open."); return }
+    view_trans[mail_key()] = ""
+    paint_mail()
+    finish_tool("The original subject and body are on screen.")
+}
+fn tool_summarize(){
+    if reading == nil { finish_tool("No message is open, so it was not summarized."); return }
+    let key = mail_key()
+    if saved_sum[key] != nil && saved_sum[key] != "" {
+        paint_mail()
+        finish_tool(saved_sum[key])
+        return
+    }
+    if react_step >= 10 { finish_tool("Step limit reached before summarize."); return }
+    react_step = react_step + 1
+    ui.agent_note.set_text("Thinking…")
+    host.request("model.complete", {
+        task: "Summarize this email in " + target_lang + ". Put only the summary in answer. Do not invent facts."
+        input: {subject: reading.subject from: reading.sender body: clip(reading.body, 6000)}
         schema: answer_schema()
         class: "fast"
         allow_urls: true
     }, fn(r){
-        finish_turn(take_answer(r))
+        let text = take_answer(r)
+        if r.is_ok { remember_sum(key, text); save_tools(); paint_mail() }
+        finish_tool(text)
     })
+}
+fn tool_translate(){
+    if reading == nil { finish_tool("No message is open, so it was not translated."); return }
+    let key = mail_key()
+    if saved_trans[key] != nil && saved_trans_lang[key] == target_lang {
+        trans_busy = false
+        view_trans[key] = "1"
+        paint_mail()
+        let sub = saved_subject[key]
+        if sub == nil { sub = "" }
+        finish_tool("Showing the saved " + target_lang + " translation. Subject: " + sub)
+        return
+    }
+    if react_step >= 10 { trans_busy = false; finish_tool("Step limit reached before translate."); return }
+    react_step = react_step + 1
+    trans_busy = true
+    refresh_translate_btn()
+    ui.agent_note.set_text("Thinking…")
+    host.request("model.complete", {
+        task: "Translate the subject and the body into the target language. Put the translated subject in subject and the translated body in text. Do not include the original. If both are already in that language, set status to already and leave subject and text empty."
+        input: {language: target_lang subject: reading.subject body: clip(reading.body, 6000)}
+        schema: translate_schema()
+        class: "fast"
+        allow_urls: true
+    }, fn(r){
+        trans_busy = false
+        if !r.is_ok { paint_mail(); finish_tool(r.error); return }
+        let status = ""
+        let text = ""
+        let subject = ""
+        if r.data != nil && r.data.output != nil {
+            status = r.data.output.status
+            text = r.data.output.text
+            subject = r.data.output.subject
+        }
+        if status == "already" {
+            view_trans[key] = ""
+            paint_mail()
+            finish_tool("Already in " + target_lang + ". The mail was not replaced.")
+            return
+        }
+        if text == nil || text == "" { paint_mail(); finish_tool("The translator returned no body."); return }
+        if subject == nil || subject == "" { subject = reading.subject }
+        remember_trans(key, target_lang, subject, text)
+        view_trans[key] = "1"
+        save_tools()
+        paint_mail()
+        finish_tool("Translated into " + target_lang + ". Subject: " + subject)
+    })
+}
+fn run_chain(){
+    if chain_i >= chain_names.len() {
+        in_chain = false
+        let text = chain_log
+        if text == "" { text = "No tool ran." }
+        observe(text)
+        return
+    }
+    let name = chain_names[chain_i].trim()
+    if name == "" {
+        chain_i = chain_i + 1
+        run_chain()
+        return
+    }
+    dispatch(name, arg_since, arg_until, arg_span)
+}
+fn tool_open_reply(){
+    if reading == nil { finish_tool("No message is open, so the reply composer was not opened."); return }
+    let subject = reading.subject
+    if subject.search("Re:") != 0 { subject = "Re: " + subject }
+    compose_kind = "reply"
+    compose(reading.address, subject, "")
+    finish_tool("Opened the reply composer with an empty body.")
+}
+fn tool_open_compose(){
+    compose_kind = "new"
+    let to = arg_to
+    let subject = arg_subject
+    let body = arg_body
+    compose(to, subject, body)
+    finish_tool("Opened the new-message composer.")
+}
+fn tool_write_reply(){
+    if !ui.composer.visible() || compose_kind != "reply" {
+        if reading == nil { finish_tool("No message is open to reply to."); return }
+        let subject = reading.subject
+        if subject.search("Re:") != 0 { subject = "Re: " + subject }
+        if arg_subject != "" { subject = arg_subject }
+        let to = reading.address
+        if arg_to != "" { to = arg_to }
+        compose_kind = "reply"
+        compose(to, subject, arg_body)
+        finish_tool("Opened the reply composer and wrote the draft.")
+        return
+    }
+    if arg_to != "" { ui.c_to.set_text(arg_to) }
+    if arg_subject != "" { ui.c_subject.set_text(arg_subject) }
+    if arg_body != "" { ui.c_body.set_text(arg_body) }
+    finish_tool("Wrote the draft into the reply.")
+}
+fn tool_write_mail(){
+    if !ui.composer.visible() || compose_kind != "new" {
+        compose_kind = "new"
+        compose(arg_to, arg_subject, arg_body)
+        finish_tool("Opened a new message and wrote the draft.")
+        return
+    }
+    if arg_to != "" { ui.c_to.set_text(arg_to) }
+    if arg_subject != "" { ui.c_subject.set_text(arg_subject) }
+    ui.c_body.set_text(arg_body)
+    finish_tool("Wrote the draft into the new message.")
+}
+fn tool_classify(){
+    if account == nil { finish_tool("No account is open."); return }
+    classify_goal = 100
+    host.request("mail.list", {account: account.id folder: "INBOX" offset: 0 limit: 100}, fn(r){
+        if !r.is_ok { finish_tool(r.error); return }
+        let raw = []
+        if r.data != nil && r.data.messages != nil { raw = r.data.messages }
+        recent = raw
+        classify_some()
+        finish_tool("Classifying the latest 100 messages into the existing folders.")
+    })
+}
+fn tool_classify_more(){
+    classify_goal = classify_goal + 100
+    if account == nil { finish_tool("No account is open."); return }
+    let offset = recent.len()
+    host.request("mail.list", {account: account.id folder: "INBOX" offset: offset limit: 100}, fn(r){
+        if !r.is_ok { finish_tool(r.error); return }
+        let more = []
+        if r.data != nil && r.data.messages != nil { more = r.data.messages }
+        for m in more { recent.push(m) }
+        classify_some()
+        finish_tool("Classifying " + classify_goal + " recent messages into the existing folders.")
+    })
+}
+fn tool_open_mail(){
+    let q = arg_query.trim()
+    if q == "" { finish_tool("No message was named."); return }
+    host.request("mail.list", {account: account.id folder: "INBOX" offset: 0 limit: 60}, fn(r){
+        let list = messages
+        if r.is_ok && r.data != nil && r.data.messages != nil { list = r.data.messages }
+        let found = nil
+        for m in list {
+            let hit = false
+            if m.subject != nil && m.subject.search(q) >= 0 { hit = true }
+            if m.sender != nil && m.sender.search(q) >= 0 { hit = true }
+            if hit { found = m }
+        }
+        if found == nil { finish_tool("No message matched " + q + "."); return }
+        open_message(found)
+        finish_tool("Opened the message: " + found.subject)
+    })
+}
+fn open_draft_sheet(){
+    if agent_busy || account == nil { return }
+    ui.draft_idea.set_text("")
+    ui.draft_sheet.set_visible(true)
+}
+fn close_draft_sheet(){
+    ui.draft_sheet.set_visible(false)
+}
+fn send_draft_idea(){
+    let idea = ui.draft_idea.text().trim()
+    if idea == "" { idea = "Let AI decide" }
+    ui.draft_sheet.set_visible(false)
+    ask_draft(idea)
+}
+fn ask_draft(idea){
+    if agent_busy || account == nil { return }
+    show_agent()
+    let q = "Write a new email in the composer in " + target_lang + ". The user's note: " + idea
+    if compose_kind == "reply" || ui.reader.visible() { q = "Write a reply to the open message in " + target_lang + " and put it in the reply composer. The user's note: " + idea }
+    pending_q = q
+    react_step = 0
+    react_trace = ""
+    in_chain = false
+    chat_log.push({role: "user" text: idea})
+    ui.chat_view.render()
+    agent_busy = true
+    react_next()
+}
+fn dispatch(tool, since, until, span){
+    if tool == "summarize" { tool_summarize(); return }
+    if tool == "translate" { tool_translate(); return }
+    if tool == "show_original" { tool_show_original(); return }
+    if tool == "read_mailbox" { tool_read_mailbox(); return }
+    if tool == "read_range" { tool_read_range(since, until, span); return }
+    if tool == "read_message" { tool_read_message(); return }
+    if tool == "open_reply" { tool_open_reply(); return }
+    if tool == "open_compose" { tool_open_compose(); return }
+    if tool == "write_reply" { tool_write_reply(); return }
+    if tool == "write_mail" { tool_write_mail(); return }
+    if tool == "open_mail" { tool_open_mail(); return }
+    if tool == "classify_more" { tool_classify_more(); return }
+    if tool == "classify" { tool_classify(); return }
+    finish_tool("Unknown tool " + tool)
+}
+fn begin_tool(label){
+    if agent_busy || account == nil { return }
+    if reading == nil { return }
+    show_agent()
+    pending_q = label
+    react_step = 0
+    react_trace = ""
+    in_chain = false
+    chat_log.push({role: "user" text: label})
+    ui.chat_view.render()
+    agent_busy = true
+    if label == "Translate" { dispatch("translate", "", "", "") }
+    else { dispatch("summarize", "", "", "") }
+}
+fn click_translate(){
+    if trans_busy { return }
+    if reading == nil { show_agent(); ui.agent_note.set_text("Open a message first."); return }
+    if view_trans[mail_key()] == "1" {
+        view_trans[mail_key()] = ""
+        paint_mail()
+        return
+    }
+    show_agent()
+    pending_q = "Translate"
+    react_step = 0
+    react_trace = ""
+    in_chain = false
+    agent_busy = false
+    trans_busy = true
+    refresh_translate_btn()
+    ui.agent_note.set_text("Thinking…")
+    tool_translate()
+}
+fn click_recognize(){
+    begin_tool("Recognize")
 }
 fn ask_agent(){
     if agent_busy || account == nil { return }
     let q = ui.agent_input.text().trim()
     if q == "" { return }
     ui.agent_input.set_text("")
+    pending_q = q
+    react_step = 0
+    react_trace = ""
+    in_chain = false
     chat_log.push({role: "user" text: q})
     ui.chat_view.render()
     agent_busy = true
-    ui.agent_note.set_text("Thinking…")
-    if agent_scope == "mailbox" {
-        host.request("mail.list", {account: account.id folder: "INBOX" offset: 0 limit: 30}, fn(r){
-            if r.is_ok { run_turn(mailbox_digest(r.data.messages, "Inbox"), q) }
-            else if messages.len() > 0 { run_turn(mailbox_digest(messages, folder.name), q) }
-            else { run_turn("No messages are loaded for this account.", q) }
-        })
-    } else {
-        run_turn(message_context(), q)
-    }
+    show_agent()
+    react_next()
 }
 fn use_draft(){
     let text = ""
@@ -429,25 +1241,14 @@ fn use_draft(){
         to = reading.address
         subject = reading.subject
         if subject.search("Re:") != 0 { subject = "Re: " + subject }
+        compose_kind = "reply"
+    } else {
+        compose_kind = "new"
     }
     compose(to, subject, text)
 }
-fn ai_summarize(){
-    if reading == nil { return }
-    ui.r_ai.set_visible(true)
-    ui.r_ai.set_text("Summarizing...")
-    host.request("model.complete", {
-        task: "Summarize this email in one sentence. Put the sentence in answer."
-        input: {subject: reading.subject from: reading.sender body: clip(reading.body, 6000)}
-        schema: answer_schema()
-        class: "fast"
-        allow_urls: true
-    }, fn(r){
-        ui.r_ai.set_text(take_answer(r))
-    })
-}
 
-start_timeout(0.05, || { load_prefs(); load_accounts() })
+start_timeout(0.05, || { load_accounts(); load_prefs() })
 
 let ink = #x1c1c1e
 let secondary = #x8e8e93
@@ -502,13 +1303,16 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
                                     if found == nil {
                                         Label{padding: Inset{left: 28} text: "Loading…" draw_text.color: secondary draw_text.text_style.font_size: 12}
                                     } else for f in found {
+                                        let fid = "" + f.id
+                                        let fname = "" + f.name
+                                        let aid = "" + a.id
                                         if folder_selected(a, f) {
-                                            GestureView{width: Fill height: 32 flow: Right align: Align{y: 0.5} padding: Inset{left: 28 right: 8} on_tap: |x, y| { commit_rename(); select_folder(a, f) }
-                                                Label{width: Fill text: f.name max_lines: 1 draw_text.color: accent draw_text.text_style: theme.font_bold{font_size: 14}}
+                                            GestureView{width: Fill height: 32 flow: Right align: Align{y: 0.5} padding: Inset{left: 28 right: 8} on_tap: |x, y| { commit_rename(); select_named(aid, fid, fname) }
+                                                Label{width: Fill text: fname max_lines: 1 draw_text.color: accent draw_text.text_style: theme.font_bold{font_size: 14}}
                                             }
                                         } else {
-                                            GestureView{width: Fill height: 32 flow: Right align: Align{y: 0.5} padding: Inset{left: 28 right: 8} on_tap: |x, y| { commit_rename(); select_folder(a, f) }
-                                                Label{width: Fill text: f.name max_lines: 1 draw_text.color: ink draw_text.text_style.font_size: 14}
+                                            GestureView{width: Fill height: 32 flow: Right align: Align{y: 0.5} padding: Inset{left: 28 right: 8} on_tap: |x, y| { commit_rename(); select_named(aid, fid, fname) }
+                                                Label{width: Fill text: fname max_lines: 1 draw_text.color: ink draw_text.text_style.font_size: 14}
                                             }
                                         }
                                     }
@@ -561,12 +1365,15 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
                 View{width: Fill height: Fit flow: Right align: Align{y: 0.5} padding: Inset{left: 8 right: 8 top: 8}
                     Bar{text: "Refresh" on_click: || sync()}
                     View{width: Fill height: 1}
-                    Bar{text: "Compose" on_click: || compose("", "", "")}
+                    Bar{text: "Compose" on_click: || { compose_kind = "new"; compose("", "", "") }}
                 }
                 View{width: Fill height: Fit flow: Down padding: Inset{left: 16 right: 16 bottom: 6} spacing: 2
                     title := Label{text: "Inbox" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 30}}
                     address := Label{text: "" draw_text.color: secondary draw_text.text_style.font_size: 12}
                     status := Label{text: "" draw_text.color: secondary draw_text.text_style.font_size: 12}
+                }
+                rows_empty := View{visible: false width: Fill height: 160 align: Align{x: 0.5 y: 0.5}
+                    Label{text: "No mail yet." draw_text.color: secondary draw_text.text_style.font_size: 13}
                 }
                 rows := ScrollYView{width: Fill height: Fill flow: Down on_render: || {
                     if messages.len() == 0 {
@@ -587,27 +1394,29 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
         View{width: Fill height: Fit flow: Right align: Align{y: 0.5} padding: Inset{left: 8 right: 8 top: 8}
             Bar{text: "‹ Back" on_click: || back_to_inbox()}
             View{width: Fill height: 1}
-            Bar{text: "Summarize" on_click: || ai_summarize()}
+            translate_btn := Bar{text: "Translate" on_click: || click_translate()}
+            Bar{text: "Recognize" on_click: || click_recognize()}
             Bar{text: "Reply" on_click: || reply()}
         }
         ScrollYView{width: Fill height: Fill flow: Down padding: 16 spacing: 6
             r_subject := Label{width: Fill text: "" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 20}}
             r_sender := Label{width: Fill text: "" draw_text.color: secondary draw_text.text_style.font_size: 13}
             r_time := Label{width: Fill text: "" draw_text.color: secondary draw_text.text_style.font_size: 12}
-            r_ai := Label{visible: false width: Fill text: "" draw_text.color: accent draw_text.text_style: theme.font_bold{font_size: 13}}
-            Hr{}
             r_attachments := Label{visible: false width: Fill text: "" draw_text.color: secondary draw_text.text_style.font_size: 12}
             r_body := Label{width: Fill text: "" draw_text.color: ink draw_text.text_style.font_size: 15}
             r_html := Html{visible: false width: Fill height: Fit padding: 0 font_color: ink font_size: 15
                 draw_text +: {color: ink}
                 text_style_normal +: {font_size: 15} text_style_bold +: {font_size: 15}
                 text_style_italic +: {font_size: 15} text_style_bold_italic +: {font_size: 15} text_style_fixed +: {font_size: 14}}
+            summary_rule := SolidView{visible: false width: Fill height: 1 draw_bg.color: #xe5e5ea}
+            r_summary := Label{visible: false width: Fill text: "" draw_text.color: ink draw_text.text_style.font_size: 15}
         }
     }
     composer := SolidView{visible: false width: Fill height: Fill flow: Down new_batch: true draw_bg.color: #ffffff padding: Inset{left: 12 right: 12 top: 8} spacing: 8
         View{width: Fill height: Fit flow: Right align: Align{y: 0.5}
             Bar{text: "Cancel" on_click: || back_to_inbox()}
             View{width: Fill height: 1}
+            Bar{text: "Draft" on_click: || open_draft_sheet()}
             Bar{text: "Send" on_click: || send()}
         }
         c_to := Field{empty_text: "To"}
@@ -663,6 +1472,63 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
                         draw_text.color: secondary draw_text.text_style.font_size: 13}
                     api_status := Label{width: Fill text: "" draw_text.color: ink draw_text.text_style.font_size: 13}
                     Bar{text: "Test connection" on_click: || refresh_provider()}
+                    Label{text: "Translation language" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 16}}
+                    View{width: Fill height: 40 flow: Overlay
+                        SolidView{width: Fill height: Fill draw_bg +: {color: #xf2f2f7 border_radius: 10.0}}
+                        GestureView{width: Fill height: Fill flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| toggle_lang_menu()
+                            lang_name := Label{width: Fill text: "中文" draw_text.color: ink draw_text.text_style.font_size: 15}
+                            lang_mark := Label{text: "▾" draw_text.color: secondary draw_text.text_style.font_size: 14}
+                        }
+                    }
+                    lang_menu := SolidView{visible: false width: Fill height: 220 flow: Down draw_bg.color: #xf2f2f7
+                        ScrollYView{width: Fill height: Fill flow: Down
+                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(0)
+                                Label{width: Fill text: "English" draw_text.color: ink draw_text.text_style.font_size: 15}}
+                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(1)
+                                Label{width: Fill text: "中文" draw_text.color: ink draw_text.text_style.font_size: 15}}
+                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(2)
+                                Label{width: Fill text: "Español" draw_text.color: ink draw_text.text_style.font_size: 15}}
+                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(3)
+                                Label{width: Fill text: "Français" draw_text.color: ink draw_text.text_style.font_size: 15}}
+                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(4)
+                                Label{width: Fill text: "Deutsch" draw_text.color: ink draw_text.text_style.font_size: 15}}
+                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(5)
+                                Label{width: Fill text: "日本語" draw_text.color: ink draw_text.text_style.font_size: 15}}
+                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(6)
+                                Label{width: Fill text: "한국어" draw_text.color: ink draw_text.text_style.font_size: 15}}
+                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(7)
+                                Label{width: Fill text: "Português" draw_text.color: ink draw_text.text_style.font_size: 15}}
+                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(8)
+                                Label{width: Fill text: "Italiano" draw_text.color: ink draw_text.text_style.font_size: 15}}
+                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(9)
+                                Label{width: Fill text: "Русский" draw_text.color: ink draw_text.text_style.font_size: 15}}
+                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(10)
+                                Label{width: Fill text: "العربية" draw_text.color: ink draw_text.text_style.font_size: 15}}
+                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(11)
+                                Label{width: Fill text: "हिन्दी" draw_text.color: ink draw_text.text_style.font_size: 15}}
+                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(12)
+                                Label{width: Fill text: "Türkçe" draw_text.color: ink draw_text.text_style.font_size: 15}}
+                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(13)
+                                Label{width: Fill text: "Tiếng Việt" draw_text.color: ink draw_text.text_style.font_size: 15}}
+                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(14)
+                                Label{width: Fill text: "Bahasa Indonesia" draw_text.color: ink draw_text.text_style.font_size: 15}}
+                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(15)
+                                Label{width: Fill text: "ไทย" draw_text.color: ink draw_text.text_style.font_size: 15}}
+                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(16)
+                                Label{width: Fill text: "Nederlands" draw_text.color: ink draw_text.text_style.font_size: 15}}
+                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(17)
+                                Label{width: Fill text: "Polski" draw_text.color: ink draw_text.text_style.font_size: 15}}
+                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_lang(18)
+                                Label{width: Fill text: "Other" draw_text.color: ink draw_text.text_style.font_size: 15}}
+                        }
+                    }
+                    lang_custom := View{visible: false width: Fill height: Fit
+                        custom_field := TextInput{width: Fill height: 40 empty_text: "Language name" on_change: |text| save_custom(text)
+                            draw_bg +: {color: #xf2f2f7 color_hover: #xf2f2f7 color_focus: #xf2f2f7 color_empty: #xf2f2f7
+                                border_color: #x00000000 border_radius: 10.0}
+                            draw_text +: {color: ink color_hover: ink color_focus: ink color_empty: secondary}}
+                    }
+                    Label{width: Fill text: "Recognize and Translate use this language. If the mail is already in it, the text stays as it is." draw_text.color: secondary draw_text.text_style.font_size: 12}
                 }
             }
             confirm := GestureView{visible: false width: Fill height: Fill align: Align{x: 0.5 y: 0.5} on_tap: |x, y| cancel_remove()
@@ -699,17 +1565,18 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
                 }
             }
             View{width: Fill height: Fill flow: Down padding: Inset{right: 12 top: 8 bottom: 10} spacing: 8
-                Label{text: "Agent" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 20}}
+                View{width: Fill height: Fit flow: Right align: Align{y: 0.5}
+                    Label{text: "Agent" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 20}}
+                    View{width: Fill height: 1}
+                    ButtonFlat{text: "🕐" width: 36 height: 36 padding: Inset{left: 0 right: 0 top: 0 bottom: 0} on_click: || toggle_history()
+                        draw_bg +: {color: #x00000000 color_hover: #x00000014 color_down: #x00000022 border_size: 0.0 border_radius: 18.0}
+                        draw_text +: {color: secondary color_hover: ink color_down: ink text_style +: {font_size: 18}}}
+                }
                 View{width: Fill height: Fill flow: Overlay
                     agent_chat := View{width: Fill height: Fill flow: Down spacing: 8
-                View{width: Fill height: Fit flow: Right
-                    Bar{text: "This message" on_click: || set_scope("message")}
-                    Bar{text: "Mailbox" on_click: || set_scope("mailbox")}
-                }
-                scope_note := Label{width: Fill text: "The open message" draw_text.color: secondary draw_text.text_style.font_size: 12}
                 chat_view := ScrollYView{width: Fill height: Fill flow: Down spacing: 10 on_render: || {
                     if chat_log.len() == 0 {
-                        Label{width: Fill text: "Ask about the open message, or switch to the mailbox." draw_text.color: secondary draw_text.text_style.font_size: 13}
+                        Label{width: Fill text: "Ask about the open message. Say all mail or a time period to use those instead." draw_text.color: secondary draw_text.text_style.font_size: 13}
                     }
                     for m in chat_log {
                         if m.role == "user" {
@@ -731,7 +1598,39 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
                     Bar{text: "Use as draft" on_click: || use_draft()}
                 }
                     }
+                    history_pane := SolidView{visible: false width: Fill height: Fill flow: Down spacing: 8 draw_bg.color: #xfafafa
+                        Bar{text: "New chat" on_click: || new_chat()}
+                        history_list := ScrollYView{width: Fill height: Fill flow: Down spacing: 4 on_render: || {
+                            if sessions.len() == 0 {
+                                Label{width: Fill text: "No earlier chats yet." draw_text.color: secondary draw_text.text_style.font_size: 13}
+                            }
+                            for i in sessions.len() {
+                                let s = sessions[i]
+                                GestureView{width: Fill height: Fit padding: Inset{top: 8 bottom: 8} on_tap: |x, y| restore_session(i)
+                                    Label{width: Fill text: s.title max_lines: 2 draw_text.color: ink draw_text.text_style.font_size: 14}
+                                }
+                                SolidView{width: Fill height: 1 draw_bg.color: #xe5e5ea}
+                            }
+                        }}
+                    }
                     agent_catch := GestureView{visible: false width: Fill height: Fill on_tap: |x, y| commit_rename()}
+                }
+            }
+        }
+    }
+    draft_sheet := GestureView{visible: false width: Fill height: Fill align: Align{x: 0.5 y: 0.5} on_tap: |x, y| close_draft_sheet()
+        draw_bg.color: #x66000000
+        GestureView{width: 360 height: Fit on_tap: |x, y| { }
+            SolidView{width: Fill height: Fit flow: Down padding: 20 spacing: 12 draw_bg +: {color: #xffffffff border_radius: 14.0}
+                Label{text: "What should this say?" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 18}}
+                draft_idea := TextInput{width: Fill height: 96 empty_text: "Let AI decide" on_return: |text| send_draft_idea()
+                    draw_bg +: {color: #xf2f2f7 color_hover: #xf2f2f7 color_focus: #xf2f2f7 color_empty: #xf2f2f7
+                        border_color: #x00000000 border_radius: 10.0}
+                    draw_text +: {color: ink color_hover: ink color_focus: ink color_empty: secondary}}
+                View{width: Fill height: Fit flow: Right
+                    Bar{text: "Cancel" on_click: || close_draft_sheet()}
+                    View{width: Fill height: 1}
+                    Bar{text: "Send" on_click: || send_draft_idea()}
                 }
             }
         }
