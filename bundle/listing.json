@@ -3,14 +3,14 @@
   "description": "一款智能邮件应用，具备 AI 能力。读取、撰写、管理邮件——助手帮你掌控收件箱。",
   "subtitle": "带 AI 的邮件应用",
   "icon": "assets/icon.png",
-  "screenshots": ["screenshots/01-main.png"],
+  "screenshots": ["screenshots/01.png"],
   "category": "productivity",
-  "platforms": ["macos", "windows"],
+  "platforms": ["windows"],
   "age_rating": "all",
   "keywords": ["mail", "email", "ai", "assistant", "summarize"],
   "publisher": {
     "name": "AAA养鸡场",
-    "support": "https://example.com/support",
-    "privacy_policy_url": "https://example.com/privacy"
+    "support": "https://github.com/Jasonsu22/AgentMail",
+    "privacy_policy_url": "https://github.com/Jasonsu22"
   }
 }
