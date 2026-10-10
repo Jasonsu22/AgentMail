@@ -33,6 +33,11 @@ let history_open = false
 let sessions = []
 let active_session = -1
 let compose_kind = "new"
+let compose_id = ""
+let compose_revision = 0
+let compose_generation = 0
+let preparing_review = false
+let reply_message = ""
 let arg_to = ""
 let arg_subject = ""
 let arg_body = ""
@@ -194,14 +199,37 @@ fn load_accounts(){
         }
     })
 }
+fn local_error(raw){
+    let t = ""
+    if raw != nil { t = "" + raw }
+    if t == "" { return "出现未知错误。" }
+    if t.search("approval_required") >= 0 { return "需要在宿主审阅里亲手批准后才会发送。" }
+    if t.search("revision_conflict") >= 0 { return "草稿已经变化。请保留还没保存的文字，再重新打开审阅。" }
+    if t.search("resource_limit") >= 0 { return "草稿数量已满。请继续用已有草稿，不要为了重试再新建一封。" }
+    if t.search("Review cancelled") >= 0 { return "已取消审阅，邮件没有发出。" }
+    if t.search("Open the app to review") >= 0 || t.search("Open Mail to review") >= 0 { return "请先打开应用，再审阅这封邮件。" }
+    if t.search("Physical Mail send") >= 0 { return "当前系统不能亲手批准发送。" }
+    if t.search("no native Mail review") >= 0 { return "这个宿主没有邮件审阅面板。" }
+    if t.search("There is no such message") >= 0 { return "找不到这封邮件。" }
+    if t.search("may not use that account") >= 0 { return "这个应用不能使用该邮箱账号。" }
+    if t.search("Enter one recipient") >= 0 { return "请填写一个收件人邮箱。" }
+    if t.search("Sign-in cancelled") >= 0 { return "已取消登录。" }
+    if t.search("Signing in needs") >= 0 { return "请在 OctoSense 弹出的面板上登录。" }
+    if t.search("Wrong password") >= 0 { return "密码不正确。" }
+    if t.search("no service answers") >= 0 { return "这台设备上没有对应的宿主服务。" }
+    if t.search("Unsupported composer") >= 0 { return "只能发给一个收件人，正文只能是纯文本。" }
+    if t.search("expected_revision") >= 0 { return "草稿版本不匹配。请重新打开审阅，不要自动再发一次。" }
+    if t.search("Submission status") >= 0 { return "发送结果还不确定。请先查看这封草稿的状态，不要自动再发一次。" }
+    return "出错了：" + t
+}
 fn add_account(){
-    status("Sign in on the sheet OctoSense shows.")
-    ui.welcome_note.set_text("Sign in on the sheet OctoSense shows.")
+    status("请在 OctoSense 弹出的面板上登录。")
+    ui.welcome_note.set_text("请在 OctoSense 弹出的面板上登录。")
     host.request("mail.add_account", {}, fn(r){
         if r.is_ok { load_accounts() }
         else {
-            status(r.error)
-            ui.welcome_note.set_text(r.error)
+            status(local_error(r.error))
+            ui.welcome_note.set_text(local_error(r.error))
         }
     })
 }
@@ -244,7 +272,7 @@ fn sync(){
             else if r.data.new > 0 { status("" + r.data.new + " new messages") }
             else { status("Up to date") }
             list()
-        } else { status(r.error) }
+        } else { status(local_error(r.error)) }
     })
 }
 fn load_classes(){
@@ -313,7 +341,7 @@ fn classify_some(){
         }
         i = i + 1
     }
-    if pending.len() == 0 { show_current(messages); return }
+    if pending.len() == 0 { return }
     let n = pending.len()
     if n > 20 { n = 20 }
     let batch = ""
@@ -341,9 +369,33 @@ fn classify_some(){
                     got = got + 1
                 }
             }
-            save_classes()
+            if got > 0 {
+                save_classes()
+                let expect = []
+                for line in lines {
+                    let bits = line.split("|")
+                    if bits.len() >= 2 && name_ok(bits[1].trim()) {
+                        expect.push({id: bits[0].trim() folder: bits[1].trim()})
+                    }
+                }
+                load_classes()
+                let ok = 0
+                let miss = 0
+                for item in expect {
+                    if classes[item.id] == item.folder { ok = ok + 1 }
+                    else { miss = miss + 1 }
+                }
+                let note = "读回确认：" + ok + " 条分类与记录一致"
+                if miss > 0 { note = note + "，" + miss + " 条没有对上" }
+                show_current(messages)
+                status(note)
+            } else {
+                show_current(messages)
+            }
+        } else {
+            show_current(messages)
+            if !r.is_ok { status(local_error(r.error)) }
         }
-        show_current(messages)
         if got > 0 { classify_some() }
     })
 }
@@ -353,7 +405,7 @@ fn list(){
     let wanted_name = "" + folder.name
     host.request("mail.list", {account: account.id folder: wanted offset: 0 limit: 100}, fn(r){
         if ("" + folder.id) != wanted { return }
-        if !r.is_ok { status(r.error); return }
+        if !r.is_ok { status(local_error(r.error)); return }
         if r.data != nil && r.data.folder != nil && ("" + r.data.folder) != wanted { return }
         let raw = []
         if r.data != nil && r.data.messages != nil { raw = r.data.messages }
@@ -385,12 +437,18 @@ fn open_message(m){
             show_reader()
             m.unread = false
             host.request("mail.mark_read", {account: account.id folder: folder.id message: m.id}, fn(done){
-                if !done.is_ok { status(done.error) }
+                if !done.is_ok { status(local_error(done.error)) }
             })
-        } else { status(r.error) }
+        } else { status(local_error(r.error)) }
     })
 }
 fn compose(to, subject, body){
+    compose_id = ""
+    compose_revision = 0
+    compose_generation = compose_generation + 1
+    preparing_review = false
+    reply_message = ""
+    if compose_kind == "reply" && open_id != "" { reply_message = open_id }
     ui.c_to.set_text(to)
     ui.c_subject.set_text(subject)
     ui.c_body.set_text(body)
@@ -404,17 +462,48 @@ fn reply(){
     compose_kind = "reply"
     compose(reading.address, subject, "")
 }
+fn send_settled(generation, r){
+    if generation != compose_generation { return }
+    preparing_review = false
+    if r.is_ok && r.data != nil {
+        if r.data.compose_id != nil && r.data.compose_id != "" { compose_id = r.data.compose_id }
+        if r.data.revision != nil { compose_revision = r.data.revision }
+        if r.data.accepted == true {
+            ui.c_note.set_text("宿主已受理这封邮件。")
+            status("邮件已受理")
+            close_detail()
+            ui.rows.render()
+            return
+        }
+    }
+    if r.is_ok {
+        ui.c_note.set_text("审阅已结束，但邮件还没有被受理。请先查看草稿状态，不要自动再发一次。")
+        return
+    }
+    ui.c_note.set_text(local_error(r.error))
+}
 fn send(){
-    if account == nil { return }
-    ui.c_note.set_text("Sending…")
-    host.request("mail.send", {account: account.id to: ui.c_to.text() subject: ui.c_subject.text() body: ui.c_body.text()}, fn(r){
-        if r.is_ok { status("Sent"); close_detail(); ui.rows.render() } else { ui.c_note.set_text(r.error) }
-    })
+    if account == nil || preparing_review { return }
+    preparing_review = true
+    let generation = compose_generation
+    ui.c_note.set_text("正在打开宿主审阅…")
+    let to = ui.c_to.text()
+    let subject = ui.c_subject.text()
+    let body = ui.c_body.text()
+    if compose_id == "" {
+        host.request("mail.review_send", {account: account.id to: to subject: subject body: body folder: folder.id message: reply_message}, fn(r){
+            send_settled(generation, r)
+        })
+    } else {
+        host.request("mail.review_send", {account: account.id compose_id: compose_id expected_revision: compose_revision to: to subject: subject body: body folder: folder.id message: reply_message}, fn(r){
+            send_settled(generation, r)
+        })
+    }
 }
 fn remove_account(id){
     if id == "" { return }
     host.request("mail.remove_account", {account: id}, fn(r){
-        if r.is_ok { load_accounts() } else { status(r.error) }
+        if r.is_ok { load_accounts() } else { status(local_error(r.error)) }
     })
 }
 fn ask_remove(a){
@@ -474,11 +563,11 @@ fn answer_schema(){
         properties: {answer: {type: "string" minLength: 1 maxLength: 4000}}}
 }
 fn take_answer(r){
-    if !r.is_ok { return r.error }
+    if !r.is_ok { return local_error(r.error) }
     if r.data != nil && r.data.output != nil && r.data.output.answer != nil {
         return r.data.output.answer
     }
-    return "The model returned no answer."
+    return "模型没有返回内容。"
 }
 fn refresh_provider(){
     ui.api_status.set_text("Testing the connection…")
@@ -489,7 +578,7 @@ fn refresh_provider(){
         class: "fast"
     }, fn(s){
         if s.is_ok { ui.api_status.set_text("Connected · using the model in AI providers") }
-        else { ui.api_status.set_text(s.error) }
+        else { ui.api_status.set_text(local_error(s.error)) }
     })
 }
 fn plan_schema(){
@@ -690,8 +779,21 @@ fn event_saved(title, start){
     }
     return false
 }
+fn event_readback(title, start){
+    load_events()
+    for e in saved_events {
+        if e.title == title && e.start == start {
+            let place = e.location
+            if place == nil { place = "" }
+            let line = "读回确认：" + e.title + " | " + e.start + " – " + e.end
+            if place != "" { line = line + " | " + place }
+            return line
+        }
+    }
+    return "读回失败：写入后没有在日程记录里找到「" + title + "」。"
+}
 fn commit_event(){
-    if pending_event == nil { return "There is no schedule waiting." }
+    if pending_event == nil { return "没有等待写入的日程。" }
     let title = pending_event.title
     let start = pending_event.start
     let end = pending_event.end
@@ -703,12 +805,12 @@ fn commit_event(){
     if location != "" { shown = shown + "\n" + location }
     if event_saved(title, start) {
         pending_event = nil
-        return "Already on the calendar.\n" + shown
+        return "日程里已经有这一条。\n" + shown + "\n" + event_readback(title, start)
     }
     saved_events.push({title: title start: start end: end location: location key: key})
     save_events()
     pending_event = nil
-    return "Added to the calendar.\n" + shown
+    return "已加入日程。\n" + shown + "\n" + event_readback(title, start)
 }
 fn agrees(text){
     let t = text.trim()
@@ -990,7 +1092,7 @@ fn observe(text){
 }
 fn react_next(){
     if react_step >= 10 {
-        finish_turn("Could not finish this request.")
+        finish_turn("这次请求没有完成。")
         return
     }
     react_step = react_step + 1
@@ -1002,7 +1104,7 @@ fn react_next(){
         class: "fast"
         allow_urls: true
     }, fn(r){
-        if !r.is_ok { finish_turn(r.error); return }
+        if !r.is_ok { finish_turn(local_error(r.error)); return }
         let stop = "continue"
         let tools = ""
         let since = ""
@@ -1122,7 +1224,7 @@ fn tool_find_event(){
         class: "fast"
         allow_urls: true
     }, fn(r){
-        if !r.is_ok { pending_event = nil; finish_tool(r.error); return }
+        if !r.is_ok { pending_event = nil; finish_tool(local_error(r.error)); return }
         let found = "no"
         let title = ""
         let start = ""
@@ -1180,7 +1282,7 @@ fn tool_translate(){
         allow_urls: true
     }, fn(r){
         trans_busy = false
-        if !r.is_ok { paint_mail(); finish_tool(r.error); return }
+        if !r.is_ok { paint_mail(); finish_tool(local_error(r.error)); return }
         let status = ""
         let text = ""
         let subject = ""
@@ -1277,7 +1379,7 @@ fn tool_classify(){
     if account == nil { finish_tool("No account is open."); return }
     classify_goal = 100
     host.request("mail.list", {account: account.id folder: "INBOX" offset: 0 limit: 100}, fn(r){
-        if !r.is_ok { finish_tool(r.error); return }
+        if !r.is_ok { finish_tool(local_error(r.error)); return }
         let raw = []
         if r.data != nil && r.data.messages != nil { raw = r.data.messages }
         recent = raw
@@ -1290,7 +1392,7 @@ fn tool_classify_more(){
     if account == nil { finish_tool("No account is open."); return }
     let offset = recent.len()
     host.request("mail.list", {account: account.id folder: "INBOX" offset: offset limit: 100}, fn(r){
-        if !r.is_ok { finish_tool(r.error); return }
+        if !r.is_ok { finish_tool(local_error(r.error)); return }
         let more = []
         if r.data != nil && r.data.messages != nil { more = r.data.messages }
         for m in more { recent.push(m) }
@@ -1357,7 +1459,7 @@ fn ask_draft(idea){
         class: "fast"
         allow_urls: true
     }, fn(r){
-        if !r.is_ok { finish_turn(r.error); return }
+        if !r.is_ok { finish_turn(local_error(r.error)); return }
         let text = take_answer(r)
         ui.c_body.set_text(text)
         finish_turn(text)
@@ -1444,7 +1546,7 @@ fn ask_agent(text){
     }
     if pending_event != nil && declines(q) {
         pending_event = nil
-        finish_turn("Not added.")
+        finish_turn("没有加入日程。")
         return
     }
     agent_busy = true
