@@ -55,7 +55,10 @@ let retry_save = false
 let send_after_status = false
 let local_drafts = []
 let editing_draft = ""
+let save_noted = false
+let quiet_notes = false
 let leave_step = 0
+let note_token = 0
 let leave_kind = ""
 let leave_aid = ""
 let leave_fid = ""
@@ -214,6 +217,9 @@ fn folder_face(name, role){
     if n == "Notes" { return say("box_notes") }
     return n
 }
+fn drafts_box(name, role){
+    return folder_face(name, role) == say("box_drafts")
+}
 fn show_heading(){
     ui.title.set_text(folder_face(folder.name, folder.role))
     if account == nil { ui.address.set_text("") }
@@ -286,7 +292,7 @@ fn say(id){
     if id == "sys_title" { return at5(i, "System language", "系统语言", "Langue du système", "システム言語", "Язык системы") }
     if id == "ui_hint" { return at5(i, "The interface uses this language.", "界面使用这个语言。", "L'interface utilise cette langue.", "画面はこの言語で表示されます。", "Интерфейс на этом языке.") }
     if id == "trans_title" { return at5(i, "Translation language", "翻译语言", "Langue de traduction", "翻訳言語", "Язык перевода") }
-    if id == "trans_hint" { return at5(i, "Recognize and Translate use this language. If the mail is already in it, the text stays as it is.", "识别和翻译使用这个语言。如果邮件已经是这个语言，就保持原文。", "Reconnaître et Traduire utilisent cette langue. Si le message l'est déjà, le texte reste tel quel.", "認識と翻訳はこの言語を使います。メールがすでにその言語なら、原文のままです。", "Распознавание и перевод используют этот язык. Если письмо уже на нём, текст не меняется.") }
+    if id == "trans_hint" { return at5(i, "Summarize and Translate use this language. If the mail is already in it, the text stays as it is.", "总结和翻译使用这个语言。如果邮件已经是这个语言，就保持原文。", "Résumer et Traduire utilisent cette langue. Si le message l'est déjà, le texte reste tel quel.", "要約と翻訳はこの言語を使います。メールがすでにその言語なら、原文のままです。", "Краткое содержание и перевод используют этот язык. Если письмо уже на нём, текст не меняется.") }
     if id == "settings" { return at5(i, "Settings", "设置", "Réglages", "設定", "Настройки") }
     if id == "accounts" { return at5(i, "Accounts", "账号", "Comptes", "アカウント", "Аккаунты") }
     if id == "system" { return at5(i, "System", "系统", "Système", "システム", "Система") }
@@ -294,10 +300,19 @@ fn say(id){
     if id == "compose" { return at5(i, "Compose", "写信", "Écrire", "作成", "Написать") }
     if id == "back" { return at5(i, "‹ Back", "‹ 返回", "‹ Retour", "‹ 戻る", "‹ Назад") }
     if id == "translate" { return at5(i, "Translate", "翻译", "Traduire", "翻訳", "Перевести") }
-    if id == "recognize" { return at5(i, "Recognize", "识别", "Reconnaître", "認識", "Распознать") }
+    if id == "already_in" { return at5(i, "This mail is already in ", "这封邮件已经是", "Ce message est déjà en ", "このメールはすでに", "Это письмо уже на языке ") }
+    if id == "already_tail" { return at5(i, ". The text was not replaced.", "，没有替换原文。", ". Le texte n'a pas été remplacé.", "なので、原文のままです。", ". Текст не заменён.") }
+    if id == "showing_saved" { return at5(i, "Showing the saved translation in ", "正在显示已保存的译文，语言是", "Affichage de la traduction enregistrée en ", "保存済みの訳を表示しています。言語は", "Показан сохранённый перевод на языке ") }
+    if id == "subject_is" { return at5(i, ". Subject: ", "。主题：", ". Objet : ", "。件名：", ". Тема: ") }
+    if id == "no_trans_body" { return at5(i, "The translator returned no body.", "翻译没有返回正文。", "Le traducteur n'a pas renvoyé de texte.", "翻訳の本文がありません。", "Переводчик не вернул текст.") }
+    if id == "translated_into" { return at5(i, "Translated into ", "已译成", "Traduit en ", "翻訳しました。言語は", "Переведено на ") }
+    if id == "not_done" { return at5(i, "This request was not finished.", "这次请求没有完成。", "Cette demande n'a pas abouti.", "この依頼は完了しませんでした。", "Этот запрос не выполнен.") }
+    if id == "translating" { return at5(i, "Translating…", "正在翻译…", "Traduction…", "翻訳中…", "Перевод…") }
+    if id == "show_original" { return at5(i, "Show original", "显示原文", "Voir l'original", "原文を表示", "Показать оригинал") }
+    if id == "recognize" { return at5(i, "Summarize", "总结", "Résumer", "要約", "Кратко") }
     if id == "reply" { return at5(i, "Reply", "回复", "Répondre", "返信", "Ответить") }
     if id == "cancel" { return at5(i, "Cancel", "取消", "Annuler", "キャンセル", "Отмена") }
-    if id == "draft" { return at5(i, "Draft", "草稿", "Brouillon", "下書き", "Черновик") }
+    if id == "draft" { return at5(i, "Help me write", "帮我写", "Écris pour moi", "書いて", "Напиши") }
     if id == "send" { return at5(i, "Send", "发送", "Envoyer", "送信", "Отправить") }
     if id == "to" { return at5(i, "To", "收件人", "Destinataire", "宛先", "Кому") }
     if id == "subject" { return at5(i, "Subject", "主题", "Objet", "件名", "Тема") }
@@ -339,14 +354,14 @@ fn say(id){
     if id == "many_new" { return at5(i, " new messages", " 封新邮件", " nouveaux messages", " 件の新着", " новых писем") }
     if id == "classifying" { return at5(i, "Classifying the latest mail…", "正在分类最近的邮件…", "Classement des derniers messages…", "最近のメールを分類しています…", "Классификация последних писем…") }
     if id == "attachments" { return at5(i, "Attachments: ", "附件：", "Pièces jointes : ", "添付：", "Вложения: ") }
-    if id == "saved_drafts" { return at5(i, "Saved to Drafts", "已存入 Drafts", "Enregistré dans Drafts", "Drafts に保存しました", "Сохранено в Drafts") }
+    if id == "saved_drafts" { return at5(i, "Saved to Drafts", "已存入草稿箱", "Enregistré dans Brouillons", "下書きに保存しました", "Сохранено в Черновики") }
     if id == "reviewing" { return at5(i, "The host is reviewing this message. Finish or cancel the review first.", "宿主正在审阅这封邮件，请先完成或取消审阅。", "L'hôte relit ce message. Terminez ou annulez d'abord.", "ホストが確認中です。先に完了するか取り消してください。", "Узел проверяет письмо. Сначала завершите или отмените проверку.") }
     if id == "leave_title" { return at5(i, "Leave the composer?", "要离开写信吗？", "Quitter la rédaction ?", "作成を離れますか？", "Выйти из письма?") }
-    if id == "leave_body" { return at5(i, "Unsent text can be saved in this account's Drafts.", "未发送的内容可以存入这个邮箱原来的 Drafts。", "Le texte non envoyé peut aller dans les Drafts de ce compte.", "未送信の内容は、このアカウントの Drafts に保存できます。", "Неотправленный текст можно сохранить в Drafts этого аккаунта.") }
+    if id == "leave_body" { return at5(i, "Unsent text can be saved in this account's Drafts.", "未发送的内容可以存入这个邮箱原来的草稿箱。", "Le texte non envoyé peut aller dans les brouillons de ce compte.", "未送信の内容は、このアカウントの下書きに保存できます。", "Неотправленный текст можно сохранить в черновики этого аккаунта.") }
     if id == "dont_save" { return at5(i, "Don't save", "不保存", "Ne pas enregistrer", "保存しない", "Не сохранять") }
-    if id == "save_drafts" { return at5(i, "Save to Drafts", "存入 Drafts", "Enregistrer dans Drafts", "Drafts に保存", "Сохранить в Drafts") }
+    if id == "save_drafts" { return at5(i, "Save to Drafts", "存入草稿箱", "Enregistrer", "下書きに保存", "В черновики") }
     if id == "confirm_again" { return at5(i, "Please confirm again", "请再确认一次", "Confirmez encore", "もう一度確認してください", "Подтвердите ещё раз") }
-    if id == "confirm_body" { return at5(i, "Save into this account's Drafts?", "确认存入这个邮箱原来的 Drafts？", "Enregistrer dans les Drafts de ce compte ?", "このアカウントの Drafts に保存しますか？", "Сохранить в Drafts этого аккаунта?") }
+    if id == "confirm_body" { return at5(i, "Save into this account's Drafts?", "确认存入这个邮箱原来的草稿箱？", "Enregistrer dans les brouillons de ce compte ?", "このアカウントの下書きに保存しますか？", "Сохранить в черновики этого аккаунта?") }
     if id == "back_compose" { return at5(i, "Back to writing", "返回写信", "Retour à la rédaction", "作成に戻る", "Вернуться к письму") }
     if id == "confirm_save" { return at5(i, "Confirm save", "确认存入", "Confirmer", "保存する", "Подтвердить") }
     if id == "accepted" { return at5(i, "The host accepted this message.", "宿主已受理这封邮件。", "L'hôte a accepté ce message.", "ホストがこのメールを受け付けました。", "Узел принял это письмо.") }
@@ -354,10 +369,10 @@ fn say(id){
     if id == "review_unsent" { return at5(i, "The review ended, but the message was not accepted. Checking this draft.", "审阅已结束，但邮件还没有被受理。正在核对这封草稿。", "La revue est finie, mais le message n'est pas accepté. Vérification du brouillon.", "確認は終わりましたが、まだ受け付けられていません。下書きを照合しています。", "Проверка закончилась, но письмо не принято. Сверяю черновик.") }
     if id == "checking_draft" { return at5(i, "Checking this draft…", "正在核对这封草稿…", "Vérification de ce brouillon…", "この下書きを照合しています…", "Сверяю этот черновик…") }
     if id == "opening_review" { return at5(i, "Opening the host review…", "正在打开宿主审阅…", "Ouverture de la revue…", "ホストの確認を開いています…", "Открываю проверку…") }
-    if id == "draft_saved" { return at5(i, "Draft saved on the host.", "草稿已保存在宿主。", "Brouillon enregistré sur l'hôte.", "下書きをホストに保存しました。", "Черновик сохранён на узле.") }
+    if id == "draft_saved" { return at5(i, "Saved locally.", "已保存到本地。", "Enregistré sur cet appareil.", "この端末に保存しました。", "Сохранено на этом устройстве.") }
     if id == "draft_checked" { return at5(i, "Checked this draft. Status: ", "已核对这封草稿，状态：", "Brouillon vérifié. État : ", "下書きを照合しました。状態：", "Черновик сверен. Статус: ") }
     if id == "same_draft" { return at5(i, ". Still the same draft.", "。没有新开一封信。", ". Toujours le même brouillon.", "。新しいメールは作っていません。", ". Это тот же черновик.") }
-    if id == "opened_draft" { return at5(i, "This message was saved in Drafts.", "这是 Drafts 里保存的一封邮件。", "Ce message a été enregistré dans Drafts.", "これは Drafts に保存したメールです。", "Это письмо сохранено в Drafts.") }
+    if id == "opened_draft" { return at5(i, "This message was saved in Drafts.", "这是草稿箱里保存的一封邮件。", "Ce message a été enregistré dans les brouillons.", "これは下書きに保存したメールです。", "Это письмо сохранено в черновиках.") }
     if id == "thinking" { return at5(i, "Thinking…", "正在思考…", "Réflexion…", "考えています…", "Думаю…") }
     if id == "open_first" { return at5(i, "Open a message first.", "请先打开一封邮件。", "Ouvrez d'abord un message.", "先にメールを開いてください。", "Сначала откройте письмо.") }
     if id == "still_working" { return at5(i, "Still working…", "还在处理…", "Encore en cours…", "まだ処理中です…", "Ещё работаю…") }
@@ -476,6 +491,7 @@ fn select_named_now(aid, fid, fname){
     list_total = 0
     list_loaded = 0
     messages = []
+    if drafts_box(fname, role) { messages = saved_draft_rows() }
     close_detail()
     show_heading()
     ui.rail_slot.render()
@@ -675,15 +691,20 @@ fn mailbox_drafts(){
     return nil
 }
 fn saved_draft_rows(){
+    load_local_drafts()
     let rows = []
     if account == nil { return rows }
+    let aid = "" + account.id
+    let only = accounts.len() <= 1
     for d in local_drafts {
-        if d.account == account.id {
+        let mine = ""
+        if d.account != nil { mine = "" + d.account }
+        if mine == aid || only {
             let sub = d.subject
             if sub == nil || sub == "" { sub = "（无主题）" }
             let who = d.to
             if who == nil || who == "" { who = "未填写收件人" }
-            rows.push({id: d.id local_draft: true sender: who time: "草稿" subject: sub preview: clip(d.body, 90) unread: false})
+            rows.push({id: d.id sender: who time: "草稿" subject: sub preview: clip(d.body, 90) unread: false})
         }
     }
     return rows
@@ -703,7 +724,14 @@ fn load_list_page(token, wanted, wanted_name, wanted_role, offset){
     host.request("mail.list", {account: account.id folder: wanted offset: offset limit: 25}, fn(r){
         if token != list_token { return }
         if ("" + folder.id) != wanted { return }
-        if !r.is_ok { status(local_error(r.error)); return }
+        if !r.is_ok {
+            if drafts_box(wanted_name, wanted_role) {
+                let kept = saved_draft_rows()
+                if kept.len() > 0 { show_current(kept); return }
+            }
+            status(local_error(r.error))
+            return
+        }
         if r.data != nil && r.data.folder != nil && ("" + r.data.folder) != wanted { return }
         let raw = []
         if r.data != nil && r.data.messages != nil { raw = r.data.messages }
@@ -719,7 +747,7 @@ fn load_list_page(token, wanted, wanted_name, wanted_role, offset){
         let shown = []
         for m in list_acc { shown.push(m) }
         if wanted == "INBOX" || wanted_name == "Inbox" { recent = shown }
-        if wanted_role == "drafts" {
+        if drafts_box(wanted_name, wanted_role) {
             let merged = saved_draft_rows()
             for m in shown { merged.push(m) }
             shown = merged
@@ -731,10 +759,17 @@ fn show_more(){
     list_shown = list_shown + 25
     list()
 }
+fn is_saved_draft(id){
+    if id == "" { return false }
+    for d in local_drafts {
+        if d.id == id { return true }
+    }
+    return false
+}
 fn open_message(m){
     let mid = ""
     if m.id != nil { mid = "" + m.id }
-    if mid.search("local-") == 0 { open_saved_draft(mid); return }
+    if is_saved_draft(mid) { open_saved_draft(mid); return }
     open_id = m.id
     host.request("mail.message", {account: account.id folder: folder.id message: m.id}, fn(r){
         if r.is_ok {
@@ -767,6 +802,8 @@ fn compose(to, subject, body){
     compose_id = ""
     compose_revision = 0
     editing_draft = ""
+    save_noted = false
+    quiet_notes = false
     compose_generation = compose_generation + 1
     preparing_review = false
     reply_message = ""
@@ -839,7 +876,7 @@ fn refresh_compose_status(){
         if remember_compose(r) {
             let st = ""
             if r.data.status != nil { st = "" + r.data.status }
-            ui.c_note.set_text(say("draft_checked") + draft_status_zh(st) + say("same_draft"))
+            if !quiet_notes { ui.c_note.set_text(say("draft_checked") + draft_status_zh(st) + say("same_draft")) }
             if retry_save {
                 retry_save = false
                 save_host_draft()
@@ -852,14 +889,14 @@ fn refresh_compose_status(){
         }
         send_after_status = false
         retry_save = false
-        ui.c_note.set_text(local_error(r.error))
+        if !quiet_notes { ui.c_note.set_text(local_error(r.error)) }
     })
 }
 fn host_draft_settled(r){
     draft_saving = false
     if save_generation != compose_generation { return }
     if remember_compose(r) {
-        ui.c_note.set_text(say("draft_saved"))
+        if !quiet_notes { note_saved() }
         if retry_save {
             retry_save = false
             save_host_draft()
@@ -906,8 +943,8 @@ fn touch_draft(){
     })
 }
 fn load_local_drafts(){
-    local_drafts = []
     if !fs.exists("drafts.txt") { return }
+    let parsed = []
     let lines = fs.read("drafts.txt").split("\n")
     for line in lines {
         if line == "" { continue }
@@ -917,9 +954,10 @@ fn load_local_drafts(){
             let src = ""
             if bits.len() >= 7 { msg = unpack(bits[6]) }
             if bits.len() >= 8 { src = unpack(bits[7]) }
-            local_drafts.push({id: unpack(bits[0]) account: unpack(bits[1]) to: unpack(bits[2]) subject: unpack(bits[3]) body: unpack(bits[4]) compose_id: unpack(bits[5]) message: msg folder: src category: "Drafts"})
+            parsed.push({id: unpack(bits[0]) account: unpack(bits[1]) to: unpack(bits[2]) subject: unpack(bits[3]) body: unpack(bits[4]) compose_id: unpack(bits[5]) message: msg folder: src category: "Drafts"})
         }
     }
+    local_drafts = parsed
 }
 fn save_local_drafts(){
     let text = ""
@@ -936,25 +974,33 @@ fn save_local_drafts(){
 fn store_local_draft(){
     if account == nil { return }
     let id = editing_draft
-    if id == "" { id = compose_id }
-    if id == "" { id = "local-" + local_drafts.len() + "-" + compose_generation }
+    if id == "" || ("" + id).search("local-") != 0 {
+        id = "local-" + compose_generation + "-" + local_drafts.len()
+    }
     let msg = reply_message
     let src = source_folder()
     let row = {id: id account: account.id to: ui.c_to.text() subject: ui.c_subject.text() body: ui.c_body.text() compose_id: compose_id message: msg folder: src category: "Drafts"}
     let next = []
-    let replaced = false
+    let placed = false
     for d in local_drafts {
-        if d.id == id {
-            next.push(row)
-            replaced = true
+        let same = false
+        if d.id == id { same = true }
+        if editing_draft != "" && d.id == editing_draft { same = true }
+        if compose_id != "" && d.compose_id == compose_id { same = true }
+        if same {
+            if !placed { next.push(row); placed = true }
         } else { next.push(d) }
     }
-    if !replaced { next.push(row) }
+    if !placed { next.push(row) }
+    let fresh = !placed
     local_drafts = next
     editing_draft = id
     save_local_drafts()
+    if fresh {
+        status(say("saved_drafts"))
+        note_saved()
+    }
     save_host_draft()
-    status(say("saved_drafts"))
 }
 fn drop_saved_draft(){
     let next = []
@@ -985,12 +1031,14 @@ fn open_saved_draft(id){
         if d.compose_id != nil { compose_id = d.compose_id }
         compose_revision = 0
         editing_draft = d.id
+        save_noted = true
+        quiet_notes = true
         compose_generation = compose_generation + 1
         preparing_review = false
         ui.c_to.set_text(d.to)
         ui.c_subject.set_text(d.subject)
         ui.c_body.set_text(d.body)
-        ui.c_note.set_text(say("opened_draft"))
+        ui.c_note.set_text("")
         show_composer()
         if compose_id != "" { refresh_compose_status() }
         return
@@ -1011,6 +1059,12 @@ fn request_leave(kind, aid, fid, fname){
         ui.c_note.set_text(say("reviewing"))
         return
     }
+    if editing_draft != "" && is_saved_draft(editing_draft) {
+        store_local_draft()
+        perform_leave(kind, aid, fid, fname)
+        list()
+        return
+    }
     if !composer_dirty() {
         perform_leave(kind, aid, fid, fname)
         return
@@ -1027,24 +1081,25 @@ fn request_leave(kind, aid, fid, fname){
     ui.draft_ask.set_visible(true)
 }
 fn draft_no(){
-    if leave_step == 2 {
-        ui.draft_ask.set_visible(false)
-        leave_step = 0
-        return
-    }
     ui.draft_ask.set_visible(false)
     leave_step = 0
     perform_leave(leave_kind, leave_aid, leave_fid, leave_fname)
 }
+fn note_saved(){
+    if quiet_notes || save_noted { return }
+    save_noted = true
+    show_note(say("draft_saved"))
+}
+fn show_note(text){
+    note_token = note_token + 1
+    let token = note_token
+    ui.c_note.set_text(text)
+    start_timeout(2, || {
+        if token != note_token { return }
+        ui.c_note.set_text("")
+    })
+}
 fn draft_yes(){
-    if leave_step == 1 {
-        leave_step = 2
-        ui.draft_title.set_text(say("confirm_again"))
-        ui.draft_body.set_text(say("confirm_body"))
-        ui.draft_no_label.set_text(say("back_compose"))
-        ui.draft_yes_label.set_text(say("confirm_save"))
-        return
-    }
     ui.draft_ask.set_visible(false)
     leave_step = 0
     store_local_draft()
@@ -1348,7 +1403,6 @@ fn apply_chrome(){
     ui.cap_body.set_text(say("message"))
     ui.welcome_lead.set_text(say("welcome"))
     ui.btn_add_welcome.set_text(say("add_account"))
-    ui.btn_add_rail.set_text(say("add_account"))
     ui.api_title.set_text("API")
     ui.api_body.set_text(say("api_body"))
     ui.btn_test.set_text(say("test"))
@@ -1650,10 +1704,30 @@ fn paint_mail(){
     refresh_translate_btn()
 }
 fn refresh_translate_btn(){
-    let label = "Translate"
-    if trans_busy { label = "Translating…" }
-    else if reading != nil && view_trans[mail_key()] == "1" { label = "Show original" }
+    let label = say("translate")
+    if trans_busy { label = say("translating") }
+    else if reading != nil && view_trans[mail_key()] == "1" { label = say("show_original") }
     ui.translate_btn.set_text(label)
+}
+fn keep_breaks(text){
+    if text == nil { return "" }
+    let parts = text.split("\n")
+    let out = ""
+    for p in parts {
+        if out != "" { out = out + "¬" }
+        out = out + p
+    }
+    return out
+}
+fn restore_breaks(text){
+    if text == nil { return "" }
+    let parts = text.split("¬")
+    let out = ""
+    for p in parts {
+        if out != "" { out = out + "\n" }
+        out = out + p
+    }
+    return out
 }
 fn one_line(text){
     if text == nil { return "" }
@@ -1707,7 +1781,7 @@ fn remember_session(){
         let tag = "A|"
         if m.role == "user" { tag = "U|" }
         if body != "" { body = body + "\n" }
-        body = body + tag + one_line(m.text)
+        body = body + tag + keep_breaks(m.text)
     }
     if active_session < 0 {
         sessions.push({title: title body: body})
@@ -1729,10 +1803,10 @@ fn restore_session(i){
     let lines = s.body.split("\n")
     for line in lines {
         let user = line.strip_prefix("U|")
-        if user != line { chat_log.push({role: "user" text: user}) }
+        if user != line { chat_log.push({role: "user" text: restore_breaks(user)}) }
         else {
             let agent = line.strip_prefix("A|")
-            if agent != line { chat_log.push({role: "agent" text: agent}) }
+            if agent != line { chat_log.push({role: "agent" text: restore_breaks(agent)}) }
         }
     }
     active_session = i
@@ -1890,14 +1964,14 @@ fn observe(text){
 }
 fn react_next(){
     if react_step >= 10 {
-        finish_turn("这次请求没有完成。")
+        finish_turn(say("not_done"))
         return
     }
     react_step = react_step + 1
     ui.agent_note.set_text(say("thinking"))
     host.request("model.complete", {
-        task: "You are AgentMail in a ReAct loop. The language field is the person's chosen language. Write answer in that language. Write any email subject and body you put in subject and body in that language too. Current screen: the value of screen. You can open the mail list, one message, the reply composer, or the new-message composer. tools is a comma-separated list run in order, or empty. Tools: read_message, read_mailbox, read_range, summarize, translate, show_original, find_event, add_event, open_reply, open_compose, write_reply, write_mail, open_mail, classify, classify_more. classify sorts the latest 100 messages into the account's existing folders, and only when the user asks. classify_more does the next 100, and only when the user asks for more. Never classify on your own. find_event reads a schedule from the open mail. add_event writes the schedule already in the pending field, and only after the user has agreed in their own later message. When the question is Recognize, call summarize then find_event before Finish. If a schedule was found, the answer must show its title, start, end, and location, then ask whether to add it. Do not call add_event during Recognize. When the user agrees, call add_event. History is the earlier chat. Use it, and use pending, so you know which schedule they mean. For write_reply and write_mail put the draft in to, subject, and body. For open_mail put words from the subject or sender in query. since, until, and span are only for read_range. After you see an observation, you may return another list. Set stop to Finish or 结束 only when answer is the reply for the user. Do not put Finish inside answer."
-        input: {question: pending_q screen: screen_now() open: open_hint() language: target_lang history: clip(history_text(), 4000) pending: event_brief() observations: clip(react_trace, 6000) step: react_step}
+        task: "You are AgentMail in a ReAct loop. The language field is the system language. Write answer in that language. If the person's own later messages ask for a different language, write answer in that language instead. Write any email subject and body you put in subject and body in the same language as answer. Current screen: the value of screen. You can open the mail list, one message, the reply composer, or the new-message composer. tools is a comma-separated list run in order, or empty. Tools: read_message, read_mailbox, read_range, summarize, translate, show_original, find_event, add_event, open_reply, open_compose, write_reply, write_mail, open_mail, classify, classify_more. classify sorts the latest 100 messages into the account's existing folders, and only when the user asks. classify_more does the next 100, and only when the user asks for more. Never classify on your own. find_event reads a schedule from the open mail. add_event writes the schedule already in the pending field, and only after the user has agreed in their own later message. When the question is Recognize, call summarize then find_event before Finish. If a schedule was found, the answer must show its title, start, end, and location, then ask whether to add it. Do not call add_event during Recognize. When the user agrees, call add_event. History is the earlier chat. Use it, and use pending, so you know which schedule they mean. For write_reply and write_mail put the draft in to, subject, and body. For open_mail put words from the subject or sender in query. since, until, and span are only for read_range. After you see an observation, you may return another list. Set stop to Finish or 结束 only when answer is the reply for the user. Do not put Finish inside answer."
+        input: {question: pending_q screen: screen_now() open: open_hint() language: sys_lang history: clip(history_text(), 4000) pending: event_brief() observations: clip(react_trace, 6000) step: react_step}
         schema: plan_schema()
         class: "fast"
         allow_urls: true
@@ -1998,7 +2072,7 @@ fn tool_summarize(){
     react_step = react_step + 1
     ui.agent_note.set_text(say("thinking"))
     host.request("model.complete", {
-        task: "Summarize this email in " + target_lang + ". Put only the summary in answer. Do not invent facts."
+        task: "Summarize this email in " + sys_lang + ". Put only the summary in answer. Do not invent facts."
         input: {subject: reading.subject from: reading.sender body: clip(reading.body, 6000)}
         schema: answer_schema()
         class: "fast"
@@ -2068,9 +2142,8 @@ fn tool_translate(){
         trans_busy = false
         view_trans[key] = "1"
         paint_mail()
-        let sub = saved_subject[key]
-        if sub == nil { sub = "" }
-        finish_tool("Showing the saved " + target_lang + " translation. Subject: " + sub)
+        if in_chain { finish_tool("Showing the saved translation.") }
+        else { agent_busy = false; ui.agent_note.set_text("") }
         return
     }
     if react_step >= 10 { trans_busy = false; finish_tool("Step limit reached before translate."); return }
@@ -2098,16 +2171,17 @@ fn tool_translate(){
         if status == "already" {
             view_trans[key] = ""
             paint_mail()
-            finish_tool("Already in " + target_lang + ". The mail was not replaced.")
+            if in_chain { finish_tool("Already in " + target_lang + ". The mail was not replaced.") }
+            else { agent_busy = false; ui.agent_note.set_text("") }
             return
         }
-        if text == nil || text == "" { paint_mail(); finish_tool("The translator returned no body."); return }
+        if text == nil || text == "" { paint_mail(); finish_tool(say("no_trans_body")); return }
         if subject == nil || subject == "" { subject = reading.subject }
         remember_trans(key, target_lang, subject, text)
         view_trans[key] = "1"
         save_tools()
         paint_mail()
-        finish_tool("Translated into " + target_lang + ". Subject: " + subject)
+        finish_tool(say("translated_into") + target_lang + say("subject_is") + subject)
     })
 }
 fn run_chain(){
@@ -2257,7 +2331,7 @@ fn ask_draft(idea){
     let mail = ""
     if reading != nil { mail = message_context() }
     host.request("model.complete", {
-        task: "Write only the email body in " + target_lang + ". If the note is Let AI decide, write a suitable message from the mail context. Do not include a subject line. Put the body in answer."
+        task: "Write only the email body in " + sys_lang + ". If the note asks for a different language, use that language instead. If the note is Let AI decide, write a suitable message from the mail context. Do not include a subject line. Put the body in answer."
         input: {note: idea mail: clip(mail, 6000)}
         schema: answer_schema()
         class: "fast"
@@ -2296,7 +2370,10 @@ fn begin_tool(label){
     react_trace = ""
     in_chain = false
     turn_can_add = false
-    chat_log.push({role: "user" text: label})
+    let shown = label
+    if label == "Recognize" { shown = say("recognize") }
+    if label == "Translate" { shown = say("translate") }
+    chat_log.push({role: "user" text: shown})
     paint_chat()
     agent_busy = true
     if label == "Translate" { dispatch("translate", "", "", "") }
@@ -2305,8 +2382,14 @@ fn begin_tool(label){
 fn click_translate(){
     if trans_busy { return }
     if reading == nil { show_agent(); ui.agent_note.set_text(say("open_first")); return }
-    if view_trans[mail_key()] == "1" {
-        view_trans[mail_key()] = ""
+    let key = mail_key()
+    if view_trans[key] == "1" {
+        view_trans[key] = ""
+        paint_mail()
+        return
+    }
+    if saved_trans[key] != nil && saved_trans_lang[key] == target_lang {
+        view_trans[key] = "1"
         paint_mail()
         return
     }
@@ -2357,7 +2440,7 @@ fn ask_agent(text){
     react_next()
 }
 
-start_timeout(0.05, || { load_accounts(); load_prefs(); load_local_drafts(); load_calendar() })
+start_timeout(0.05, || { load_local_drafts(); load_accounts(); load_prefs(); load_calendar() })
 
 let ink = #x1c1c1e
 let secondary = #x8e8e93
@@ -2431,7 +2514,7 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
                             GestureView{width: Fill height: Fill on_tap: |x, y| commit_rename()}
                         }
                         View{width: Fill height: Fit flow: Right align: Align{y: 0.5} padding: Inset{left: 8 right: 8 bottom: 10} spacing: 2
-                            btn_add_rail := ButtonFlat{text: "添加账号" width: Fill height: 36 on_click: || { commit_rename(); add_account() }
+                            btn_add_rail := ButtonFlat{text: say("add_account") width: Fill height: 36 on_click: || { commit_rename(); add_account() }
                                 draw_bg +: {color: #x00000000 color_hover: #x00000018 color_down: #x00000028 border_size: 0.0 border_radius: 8.0}
                                 draw_text +: {color: accent color_hover: accent color_down: accent text_style +: {font_size: 14}}}
                             ButtonFlat{text: "⚙️" width: 40 height: 40 padding: Inset{left: 0 right: 0 top: 0 bottom: 0} on_click: || open_settings()
@@ -2510,7 +2593,7 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
             btn_back := Bar{text: "‹ 返回" on_click: || back_to_inbox()}
             View{width: Fill height: 1}
             translate_btn := Bar{text: "翻译" on_click: || click_translate()}
-            btn_recognize := Bar{text: "识别" on_click: || click_recognize()}
+            btn_recognize := Bar{text: "总结" on_click: || click_recognize()}
             btn_reply := Bar{text: "回复" on_click: || reply()}
         }
         ScrollYView{width: Fill height: Fill flow: Down padding: 16 spacing: 6
@@ -2531,7 +2614,7 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
         View{width: Fill height: Fit flow: Right align: Align{y: 0.5}
             btn_cancel := Bar{text: "取消" on_click: || back_to_inbox()}
             View{width: Fill height: 1}
-            btn_draft := Bar{text: "草稿" on_click: || open_draft_sheet()}
+            btn_draft := Bar{text: "帮我写" on_click: || open_draft_sheet()}
             btn_send := Bar{text: "发送" on_click: || send()}
         }
         cap_to := Label{text: "收件人" draw_text.color: secondary draw_text.text_style.font_size: 12}
@@ -2644,7 +2727,7 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
                                 border_color: #x00000000 border_radius: 10.0}
                             draw_text +: {color: ink color_hover: ink color_focus: ink color_empty: secondary}}
                     }
-                    trans_hint := Label{width: Fill text: "识别和翻译使用这个语言。如果邮件已经是这个语言，就保持原文。" draw_text.color: secondary draw_text.text_style.font_size: 12}
+                    trans_hint := Label{width: Fill text: "总结和翻译使用这个语言。如果邮件已经是这个语言，就保持原文。" draw_text.color: secondary draw_text.text_style.font_size: 12}
                 }
             }
             draft_ask := GestureView{visible: false width: Fill height: Fill align: Align{x: 0.5 y: 0.5} on_tap: |x, y| { }
@@ -2713,9 +2796,13 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
                     }
                     for m in chat_log {
                         if m.role == "user" {
-                            Label{width: Fill text: m.text draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 14}}
+                            SolidView{width: Fill height: Fit padding: Inset{left: 10 right: 10 top: 8 bottom: 8} show_bg: true draw_bg.color: #xd6e8ff draw_bg.border_radius: 12.0
+                                Label{width: Fill text: m.text draw_text.color: ink draw_text.wrap: Words draw_text.text_style: theme.font_bold{font_size: 14}}
+                            }
                         } else {
-                            Label{width: Fill text: m.text draw_text.color: ink draw_text.text_style.font_size: 14}
+                            SolidView{width: Fill height: Fit padding: Inset{left: 10 right: 10 top: 8 bottom: 8} show_bg: true draw_bg.color: #xffffff draw_bg.border_radius: 12.0
+                                Label{width: Fill text: m.text draw_text.color: ink draw_text.wrap: Words draw_text.text_style.font_size: 14}
+                            }
                         }
                     }
                 }}
