@@ -25,6 +25,8 @@ let pending_q = ""
 let pending_input = ""
 let pending_event = nil
 let saved_events = []
+let calendar_handle = ""
+let calendar_retried = false
 let turn_can_add = false
 let follow_gen = 0
 let follow_locked = false
@@ -38,6 +40,19 @@ let compose_revision = 0
 let compose_generation = 0
 let preparing_review = false
 let reply_message = ""
+let reply_folder = ""
+let draft_save_gen = 0
+let save_generation = 0
+let draft_saving = false
+let retry_save = false
+let send_after_status = false
+let local_drafts = []
+let editing_draft = ""
+let leave_step = 0
+let leave_kind = ""
+let leave_aid = ""
+let leave_fid = ""
+let leave_fname = ""
 let arg_to = ""
 let arg_subject = ""
 let arg_body = ""
@@ -56,6 +71,9 @@ let lang_open = false
 let lang_is_other = false
 let custom_lang = ""
 let lang_labels = ["English" "中文" "Français" "日本語" "Русский" "Others"]
+let sys_lang = "中文"
+let sys_open = false
+let sys_labels = ["English" "中文" "Français" "日本語" "Русский"]
 let trans_busy = false
 let view_trans = {}
 let saved_sum = {}
@@ -123,8 +141,16 @@ fn load_prefs(){
             if bits.len() >= 2 && bits[0] != "" { names[bits[0]] = bits[1] }
         }
     }
+    if fs.exists("syslang.txt") {
+        let line = fs.read("syslang.txt").trim()
+        for label in sys_labels {
+            if label == line { sys_lang = line }
+        }
+    }
     refresh_lang_face()
+    refresh_sys_face()
     ui.lang_menu.set_visible(false)
+    ui.sys_menu.set_visible(false)
     ui.lang_custom.set_visible(lang_is_other)
     if lang_is_other { ui.custom_field.set_text(custom_lang) }
 }
@@ -199,32 +225,164 @@ fn load_accounts(){
         }
     })
 }
+fn sys_slot(){
+    let i = 0
+    for label in sys_labels {
+        if label == sys_lang { return i }
+        i = i + 1
+    }
+    return 1
+}
+fn at5(i, en, zh, fr, ja, ru){
+    if i == 0 { return en }
+    if i == 2 { return fr }
+    if i == 3 { return ja }
+    if i == 4 { return ru }
+    return zh
+}
+fn say(id){
+    let i = sys_slot()
+    if id == "password_missing" { return at5(i, "The account password is missing. Sign in again.", "这个邮箱的密码不在了，请重新登录。", "Le mot de passe du compte est absent. Reconnectez-vous.", "アカウントのパスワードがありません。もう一度ログインしてください。", "Пароль аккаунта отсутствует. Войдите снова.") }
+    if id == "approval" { return at5(i, "Sending needs your approval in the host review.", "需要在宿主审阅里亲手批准后才会发送。", "L'envoi attend votre accord dans la revue de l'hôte.", "送信するにはホストの確認で自分で承認する必要があります。", "Отправка ждёт вашего подтверждения в окне проверки.") }
+    if id == "revision" { return at5(i, "The draft changed. Keep the unsaved text and open the review again.", "草稿已经变化。请保留还没保存的文字，再重新打开审阅。", "Le brouillon a changé. Gardez le texte non enregistré et rouvrez la revue.", "下書きが変わりました。未保存の文を残して、確認を開き直してください。", "Черновик изменился. Сохраните несохранённый текст и откройте проверку снова.") }
+    if id == "resource" { return at5(i, "The draft limit is full. Keep using an existing draft.", "草稿数量已满。请继续用已有草稿，不要为了重试再新建一封。", "La limite de brouillons est atteinte. Réutilisez un brouillon existant.", "下書きの上限です。新しい手紙を作らず、今の下書きを使ってください。", "Лимит черновиков исчерпан. Используйте уже существующий.") }
+    if id == "cancelled" { return at5(i, "Review cancelled. Nothing was sent.", "已取消审阅，邮件没有发出。", "Revue annulée. Rien n'a été envoyé.", "確認を取り消しました。メールは送られていません。", "Проверка отменена. Письмо не отправлено.") }
+    if id == "open_review" { return at5(i, "Open the app before reviewing this message.", "请先打开应用，再审阅这封邮件。", "Ouvrez l'application avant de relire ce message.", "このメールを確認する前にアプリを開いてください。", "Сначала откройте приложение, затем проверьте письмо.") }
+    if id == "physical" { return at5(i, "This system cannot approve sending by hand.", "当前系统不能亲手批准发送。", "Ce système ne peut pas approuver l'envoi à la main.", "このシステムでは手動で送信を承認できません。", "Эта система не может подтвердить отправку вручную.") }
+    if id == "no_review" { return at5(i, "This host has no mail review panel.", "这个宿主没有邮件审阅面板。", "Cet hôte n'a pas de panneau de revue du courrier.", "このホストにはメール確認パネルがありません。", "У этого узла нет панели проверки почты.") }
+    if id == "no_message" { return at5(i, "That message could not be found.", "找不到这封邮件。", "Ce message est introuvable.", "そのメールが見つかりません。", "Это письмо не найдено.") }
+    if id == "account_denied" { return at5(i, "This app cannot use that account.", "这个应用不能使用该邮箱账号。", "Cette application ne peut pas utiliser ce compte.", "このアプリはそのアカウントを使えません。", "Это приложение не может использовать этот аккаунт.") }
+    if id == "one_recipient" { return at5(i, "Enter one recipient address.", "请填写一个收件人邮箱。", "Indiquez une seule adresse de destinataire.", "宛先は一つだけ入力してください。", "Укажите один адрес получателя.") }
+    if id == "signin_cancel" { return at5(i, "Sign-in was cancelled.", "已取消登录。", "La connexion a été annulée.", "ログインを取り消しました。", "Вход отменён.") }
+    if id == "signin_sheet" { return at5(i, "Sign in on the panel OctoSense shows.", "请在 OctoSense 弹出的面板上登录。", "Connectez-vous dans le panneau affiché par OctoSense.", "OctoSense が表示するパネルでログインしてください。", "Войдите в панели, которую показывает OctoSense.") }
+    if id == "wrong_password" { return at5(i, "The password is wrong.", "密码不正确。", "Le mot de passe est incorrect.", "パスワードが違います。", "Неверный пароль.") }
+    if id == "no_service" { return at5(i, "This device has no matching host service.", "这台设备上没有对应的宿主服务。", "Cet appareil n'a pas le service hôte correspondant.", "この端末には対応するホストサービスがありません。", "На этом устройстве нет нужной службы.") }
+    if id == "composer" { return at5(i, "Only one recipient is allowed, and the body must be plain text.", "只能发给一个收件人，正文只能是纯文本。", "Un seul destinataire, et le texte doit être brut.", "宛先は一人だけで、本文はプレーンテキストだけです。", "Только один получатель, и текст без разметки.") }
+    if id == "revision_required" { return at5(i, "The draft version does not match. Open the review again.", "草稿版本不匹配。请重新打开审阅，不要自动再发一次。", "La version du brouillon ne correspond pas. Rouvrez la revue.", "下書きの版が合いません。確認を開き直してください。", "Версия черновика не совпадает. Откройте проверку снова.") }
+    if id == "submission" { return at5(i, "The send result is not certain yet. Check this draft before trying again.", "发送结果还不确定。请先查看这封草稿的状态，不要自动再发一次。", "Le résultat de l'envoi n'est pas certain. Vérifiez ce brouillon.", "送信結果がまだ分かりません。この下書きを確認してください。", "Результат отправки ещё не ясен. Сначала проверьте черновик.") }
+    if id == "sys_title" { return at5(i, "System language", "系统语言", "Langue du système", "システム言語", "Язык системы") }
+    if id == "ui_hint" { return at5(i, "The interface uses this language.", "界面使用这个语言。", "L'interface utilise cette langue.", "画面はこの言語で表示されます。", "Интерфейс на этом языке.") }
+    if id == "trans_title" { return at5(i, "Translation language", "翻译语言", "Langue de traduction", "翻訳言語", "Язык перевода") }
+    if id == "trans_hint" { return at5(i, "Recognize and Translate use this language. If the mail is already in it, the text stays as it is.", "识别和翻译使用这个语言。如果邮件已经是这个语言，就保持原文。", "Reconnaître et Traduire utilisent cette langue. Si le message l'est déjà, le texte reste tel quel.", "認識と翻訳はこの言語を使います。メールがすでにその言語なら、原文のままです。", "Распознавание и перевод используют этот язык. Если письмо уже на нём, текст не меняется.") }
+    if id == "settings" { return at5(i, "Settings", "设置", "Réglages", "設定", "Настройки") }
+    if id == "accounts" { return at5(i, "Accounts", "账号", "Comptes", "アカウント", "Аккаунты") }
+    if id == "system" { return at5(i, "System", "系统", "Système", "システム", "Система") }
+    if id == "refresh" { return at5(i, "Refresh", "刷新", "Actualiser", "更新", "Обновить") }
+    if id == "compose" { return at5(i, "Compose", "写信", "Écrire", "作成", "Написать") }
+    if id == "back" { return at5(i, "‹ Back", "‹ 返回", "‹ Retour", "‹ 戻る", "‹ Назад") }
+    if id == "translate" { return at5(i, "Translate", "翻译", "Traduire", "翻訳", "Перевести") }
+    if id == "recognize" { return at5(i, "Recognize", "识别", "Reconnaître", "認識", "Распознать") }
+    if id == "reply" { return at5(i, "Reply", "回复", "Répondre", "返信", "Ответить") }
+    if id == "cancel" { return at5(i, "Cancel", "取消", "Annuler", "キャンセル", "Отмена") }
+    if id == "draft" { return at5(i, "Draft", "草稿", "Brouillon", "下書き", "Черновик") }
+    if id == "send" { return at5(i, "Send", "发送", "Envoyer", "送信", "Отправить") }
+    if id == "to" { return at5(i, "To", "收件人", "Destinataire", "宛先", "Кому") }
+    if id == "subject" { return at5(i, "Subject", "主题", "Objet", "件名", "Тема") }
+    if id == "message" { return at5(i, "Message", "正文", "Message", "本文", "Текст") }
+    if id == "add_account" { return at5(i, "Add account", "添加账号", "Ajouter un compte", "アカウントを追加", "Добавить аккаунт") }
+    if id == "welcome" { return at5(i, "Add an account to read and send mail. OctoSense keeps your password; AgentMail never sees it.", "添加账号后即可收发邮件。密码由 OctoSense 保管，AgentMail 看不到。", "Ajoutez un compte pour lire et envoyer. OctoSense garde le mot de passe ; AgentMail ne le voit pas.", "アカウントを追加すると送受信できます。パスワードは OctoSense が保管し、AgentMail は見ません。", "Добавьте аккаунт, чтобы читать и отправлять почту. Пароль хранит OctoSense, AgentMail его не видит.") }
+    if id == "no_mail" { return at5(i, "No mail yet.", "还没有邮件。", "Pas encore de courrier.", "メールはまだありません。", "Писем пока нет.") }
+    if id == "loading" { return at5(i, "Loading…", "正在加载…", "Chargement…", "読み込み中…", "Загрузка…") }
+    if id == "no_accounts" { return at5(i, "No accounts yet.", "还没有账号。", "Aucun compte.", "アカウントはまだありません。", "Аккаунтов пока нет.") }
+    if id == "remove" { return at5(i, "Remove", "移除", "Retirer", "削除", "Удалить") }
+    if id == "remove_ask" { return at5(i, "Remove this account?", "移除这个账号？", "Retirer ce compte ?", "このアカウントを削除しますか？", "Удалить этот аккаунт?") }
+    if id == "api_body" { return at5(i, "AgentMail does not take an API key. Add your provider in OctoSense: Start → Settings → AI providers. The key stays on this device.", "AgentMail 不接收 API 密钥。请在 OctoSense 中添加：开始 → 设置 → AI providers。密钥只留在这台设备上。", "AgentMail ne demande pas de clé API. Ajoutez le fournisseur dans OctoSense : Démarrer → Réglages → AI providers. La clé reste sur cet appareil.", "AgentMail は API キーを受け取りません。OctoSense の 開始 → 設定 → AI providers で追加してください。キーはこの端末に残ります。", "AgentMail не принимает API-ключ. Добавьте провайдера в OctoSense: Пуск → Настройки → AI providers. Ключ остаётся на этом устройстве.") }
+    if id == "test" { return at5(i, "Test connection", "测试连接", "Tester la connexion", "接続を試す", "Проверить соединение") }
+    if id == "testing" { return at5(i, "Testing the connection…", "正在测试连接…", "Test de la connexion…", "接続を試しています…", "Проверка соединения…") }
+    if id == "connected" { return at5(i, "Connected · using the model in AI providers", "已连接 · 使用 AI providers 里的模型", "Connecté · modèle défini dans AI providers", "接続済み · AI providers のモデルを使用", "Подключено · модель из AI providers") }
+    if id == "agent" { return at5(i, "Agent", "助手", "Assistant", "アシスタント", "Ассистент") }
+    if id == "ask_hint" { return at5(i, "Ask about the open message. Say all mail or a time period to use those instead.", "可以询问当前打开的邮件。也可以说全部邮件或一段时间。", "Posez une question sur le message ouvert, ou dites tout le courrier ou une période.", "開いているメールについて聞けます。すべてのメールや期間も指定できます。", "Спросите про открытое письмо, всю почту или период.") }
+    if id == "ask" { return at5(i, "Ask", "提问", "Demander", "質問", "Спросить") }
+    if id == "new_chat" { return at5(i, "New chat", "新对话", "Nouvelle discussion", "新しい会話", "Новый чат") }
+    if id == "no_chats" { return at5(i, "No earlier chats yet.", "还没有更早的对话。", "Pas encore de discussion précédente.", "以前の会話はまだありません。", "Более ранних диалогов пока нет.") }
+    if id == "draft_prompt" { return at5(i, "What should this say?", "这封信要写什么？", "Que doit dire ce message ?", "このメールには何を書きますか？", "Что написать в письме?") }
+    if id == "let_ai" { return at5(i, "Let AI decide", "让 AI 决定", "Laisser l'IA décider", "AI に任せる", "Пусть решит ИИ") }
+    if id == "lang_name" { return at5(i, "Language name", "语言名称", "Nom de la langue", "言語名", "Название языка") }
+    if id == "name" { return at5(i, "Name", "名称", "Nom", "名前", "Имя") }
+    if id == "checking" { return at5(i, "Checking for mail…", "正在检查邮件…", "Vérification du courrier…", "メールを確認しています…", "Проверка почты…") }
+    if id == "one_new" { return at5(i, "1 new message", "1 封新邮件", "1 nouveau message", "新着 1 件", "1 новое письмо") }
+    if id == "up_to_date" { return at5(i, "Up to date", "已是最新", "À jour", "最新です", "Всё актуально") }
+    if id == "many_new" { return at5(i, " new messages", " 封新邮件", " nouveaux messages", " 件の新着", " новых писем") }
+    if id == "classifying" { return at5(i, "Classifying the latest mail…", "正在分类最近的邮件…", "Classement des derniers messages…", "最近のメールを分類しています…", "Классификация последних писем…") }
+    if id == "attachments" { return at5(i, "Attachments: ", "附件：", "Pièces jointes : ", "添付：", "Вложения: ") }
+    if id == "saved_drafts" { return at5(i, "Saved to Drafts", "已存入 Drafts", "Enregistré dans Drafts", "Drafts に保存しました", "Сохранено в Drafts") }
+    if id == "reviewing" { return at5(i, "The host is reviewing this message. Finish or cancel the review first.", "宿主正在审阅这封邮件，请先完成或取消审阅。", "L'hôte relit ce message. Terminez ou annulez d'abord.", "ホストが確認中です。先に完了するか取り消してください。", "Узел проверяет письмо. Сначала завершите или отмените проверку.") }
+    if id == "leave_title" { return at5(i, "Leave the composer?", "要离开写信吗？", "Quitter la rédaction ?", "作成を離れますか？", "Выйти из письма?") }
+    if id == "leave_body" { return at5(i, "Unsent text can be saved in this account's Drafts.", "未发送的内容可以存入这个邮箱原来的 Drafts。", "Le texte non envoyé peut aller dans les Drafts de ce compte.", "未送信の内容は、このアカウントの Drafts に保存できます。", "Неотправленный текст можно сохранить в Drafts этого аккаунта.") }
+    if id == "dont_save" { return at5(i, "Don't save", "不保存", "Ne pas enregistrer", "保存しない", "Не сохранять") }
+    if id == "save_drafts" { return at5(i, "Save to Drafts", "存入 Drafts", "Enregistrer dans Drafts", "Drafts に保存", "Сохранить в Drafts") }
+    if id == "confirm_again" { return at5(i, "Please confirm again", "请再确认一次", "Confirmez encore", "もう一度確認してください", "Подтвердите ещё раз") }
+    if id == "confirm_body" { return at5(i, "Save into this account's Drafts?", "确认存入这个邮箱原来的 Drafts？", "Enregistrer dans les Drafts de ce compte ?", "このアカウントの Drafts に保存しますか？", "Сохранить в Drafts этого аккаунта?") }
+    if id == "back_compose" { return at5(i, "Back to writing", "返回写信", "Retour à la rédaction", "作成に戻る", "Вернуться к письму") }
+    if id == "confirm_save" { return at5(i, "Confirm save", "确认存入", "Confirmer", "保存する", "Подтвердить") }
+    if id == "accepted" { return at5(i, "The host accepted this message.", "宿主已受理这封邮件。", "L'hôte a accepté ce message.", "ホストがこのメールを受け付けました。", "Узел принял это письмо.") }
+    if id == "accepted_short" { return at5(i, "Message accepted", "邮件已受理", "Message accepté", "メールを受け付けました", "Письмо принято") }
+    if id == "review_unsent" { return at5(i, "The review ended, but the message was not accepted. Checking this draft.", "审阅已结束，但邮件还没有被受理。正在核对这封草稿。", "La revue est finie, mais le message n'est pas accepté. Vérification du brouillon.", "確認は終わりましたが、まだ受け付けられていません。下書きを照合しています。", "Проверка закончилась, но письмо не принято. Сверяю черновик.") }
+    if id == "checking_draft" { return at5(i, "Checking this draft…", "正在核对这封草稿…", "Vérification de ce brouillon…", "この下書きを照合しています…", "Сверяю этот черновик…") }
+    if id == "opening_review" { return at5(i, "Opening the host review…", "正在打开宿主审阅…", "Ouverture de la revue…", "ホストの確認を開いています…", "Открываю проверку…") }
+    if id == "draft_saved" { return at5(i, "Draft saved on the host.", "草稿已保存在宿主。", "Brouillon enregistré sur l'hôte.", "下書きをホストに保存しました。", "Черновик сохранён на узле.") }
+    if id == "draft_checked" { return at5(i, "Checked this draft. Status: ", "已核对这封草稿，状态：", "Brouillon vérifié. État : ", "下書きを照合しました。状態：", "Черновик сверен. Статус: ") }
+    if id == "same_draft" { return at5(i, ". Still the same draft.", "。没有新开一封信。", ". Toujours le même brouillon.", "。新しいメールは作っていません。", ". Это тот же черновик.") }
+    if id == "opened_draft" { return at5(i, "This message was saved in Drafts.", "这是 Drafts 里保存的一封邮件。", "Ce message a été enregistré dans Drafts.", "これは Drafts に保存したメールです。", "Это письмо сохранено в Drafts.") }
+    if id == "thinking" { return at5(i, "Thinking…", "正在思考…", "Réflexion…", "考えています…", "Думаю…") }
+    if id == "open_first" { return at5(i, "Open a message first.", "请先打开一封邮件。", "Ouvrez d'abord un message.", "先にメールを開いてください。", "Сначала откройте письмо.") }
+    if id == "still_working" { return at5(i, "Still working…", "还在处理…", "Encore en cours…", "まだ処理中です…", "Ещё работаю…") }
+    if id == "need_account" { return at5(i, "Add an account first.", "请先添加账号。", "Ajoutez d'abord un compte.", "先にアカウントを追加してください。", "Сначала добавьте аккаунт.") }
+    if id == "not_added" { return at5(i, "Not added to the schedule.", "没有加入日程。", "Pas ajouté à l'agenda.", "予定には追加しませんでした。", "В расписание не добавлено.") }
+    if id == "no_pending" { return at5(i, "There is no schedule waiting.", "没有等待写入的日程。", "Aucun horaire en attente.", "書き込み待ちの予定はありません。", "Нет расписания для записи.") }
+    if id == "added_cal" { return at5(i, "Added to the schedule.", "已加入日程。", "Ajouté à l'agenda.", "予定に追加しました。", "Добавлено в расписание.") }
+    if id == "already_cal" { return at5(i, "This schedule is already saved.", "日程里已经有这一条。", "Cet horaire est déjà enregistré.", "この予定はすでにあります。", "Это расписание уже сохранено.") }
+    if id == "os_saved" { return at5(i, "Saved on the system calendar.", "已写入系统日历。", "Enregistré dans le calendrier du système.", "システムのカレンダーに書き込みました。", "Записано в системный календарь.") }
+    if id == "bad_time" { return at5(i, "The time could not be placed on the system calendar, so it was kept in the app.", "时间无法写入系统日历，已先记在应用里。", "L'heure ne peut pas aller au calendrier système ; elle reste dans l'application.", "時刻をシステムカレンダーに書けないので、アプリ内に残しました。", "Время нельзя записать в системный календарь, оно сохранено в приложении.") }
+    if id == "no_calendar" { return at5(i, "No writable calendar was found.", "没有找到可写入的日历。", "Aucun calendrier modifiable.", "書き込めるカレンダーがありません。", "Нет календаря, доступного для записи.") }
+    if id == "cal_denied" { return at5(i, "Calendar access was not granted.", "没有获得日历权限。", "L'accès au calendrier n'a pas été accordé.", "カレンダーの許可がありません。", "Доступ к календарю не дан.") }
+    if id == "cal_unsupported" { return at5(i, "This system has no device calendar.", "这个系统没有设备日历。", "Ce système n'a pas de calendrier d'appareil.", "このシステムにはデバイスカレンダーがありません。", "На этой системе нет календаря устройства.") }
+    if id == "cal_cancelled" { return at5(i, "Calendar review was cancelled. Nothing was added.", "已取消日历审阅，没有加入日程。", "Revue du calendrier annulée. Rien n'a été ajouté.", "カレンダー確認を取り消しました。予定は追加されていません。", "Проверка календаря отменена. Ничего не добавлено.") }
+    if id == "cal_readonly" { return at5(i, "That calendar cannot be edited.", "这个日历不能修改。", "Ce calendrier ne peut pas être modifié.", "このカレンダーは編集できません。", "Этот календарь нельзя изменить.") }
+    if id == "cal_unconfigured" { return at5(i, "This build cannot request calendar permission.", "这个版本不能申请日历权限。", "Cette version ne peut pas demander l'accès au calendrier.", "このビルドはカレンダー許可を申請できません。", "Эта сборка не может запросить доступ к календарю.") }
+    if id == "cal_foreground" { return at5(i, "Open AgentMail, then approve the calendar review.", "请先打开 AgentMail，再同意日历审阅。", "Ouvrez AgentMail, puis approuvez la revue du calendrier.", "AgentMail を開いてから、カレンダーの確認に同意してください。", "Откройте AgentMail и подтвердите проверку календаря.") }
+    if id == "readback" { return at5(i, "Read back: ", "读回确认：", "Relecture : ", "読み戻し：", "Прочитано: ") }
+    if id == "readback_fail" { return at5(i, "Read-back failed. The schedule was not found.", "读回失败：写入后没有在日程记录里找到这一条。", "Relecture échouée : l'horaire n'a pas été retrouvé.", "読み戻し失敗：予定記録に見つかりません。", "Проверка не удалась: запись не найдена.") }
+    if id == "class_ok" { return at5(i, "Read back: ", "读回确认：", "Relecture : ", "読み戻し：", "Прочитано: ") }
+    if id == "class_match" { return at5(i, " classifications match the record", " 条分类与记录一致", " classements correspondent", " 件の分類が記録と一致", " классификаций совпали") }
+    if id == "class_miss" { return at5(i, " did not match", " 条没有对上", " ne correspondent pas", " 件が一致しません", " не совпали") }
+    return at5(i, "Something went wrong.", "出现未知错误。", "Une erreur inconnue s'est produite.", "不明なエラーが起きました。", "Произошла неизвестная ошибка.")
+}
 fn local_error(raw){
     let t = ""
     if raw != nil { t = "" + raw }
-    if t == "" { return "出现未知错误。" }
-    if t.search("approval_required") >= 0 { return "需要在宿主审阅里亲手批准后才会发送。" }
-    if t.search("revision_conflict") >= 0 { return "草稿已经变化。请保留还没保存的文字，再重新打开审阅。" }
-    if t.search("resource_limit") >= 0 { return "草稿数量已满。请继续用已有草稿，不要为了重试再新建一封。" }
-    if t.search("Review cancelled") >= 0 { return "已取消审阅，邮件没有发出。" }
-    if t.search("Open the app to review") >= 0 || t.search("Open Mail to review") >= 0 { return "请先打开应用，再审阅这封邮件。" }
-    if t.search("Physical Mail send") >= 0 { return "当前系统不能亲手批准发送。" }
-    if t.search("no native Mail review") >= 0 { return "这个宿主没有邮件审阅面板。" }
-    if t.search("There is no such message") >= 0 { return "找不到这封邮件。" }
-    if t.search("may not use that account") >= 0 { return "这个应用不能使用该邮箱账号。" }
-    if t.search("Enter one recipient") >= 0 { return "请填写一个收件人邮箱。" }
-    if t.search("Sign-in cancelled") >= 0 { return "已取消登录。" }
-    if t.search("Signing in needs") >= 0 { return "请在 OctoSense 弹出的面板上登录。" }
-    if t.search("Wrong password") >= 0 { return "密码不正确。" }
-    if t.search("no service answers") >= 0 { return "这台设备上没有对应的宿主服务。" }
-    if t.search("Unsupported composer") >= 0 { return "只能发给一个收件人，正文只能是纯文本。" }
-    if t.search("expected_revision") >= 0 { return "草稿版本不匹配。请重新打开审阅，不要自动再发一次。" }
-    if t.search("Submission status") >= 0 { return "发送结果还不确定。请先查看这封草稿的状态，不要自动再发一次。" }
-    return "出错了：" + t
+    if t == "" { return say("unknown") }
+    if t.search("password is missing") >= 0 { return say("password_missing") }
+    if t.search("approval_required") >= 0 { return say("approval") }
+    if t.search("revision_conflict") >= 0 { return say("revision") }
+    if t.search("resource_limit") >= 0 { return say("resource") }
+    if t.search("Review cancelled") >= 0 { return say("cancelled") }
+    if t.search("Open the app to review") >= 0 || t.search("Open Mail to review") >= 0 { return say("open_review") }
+    if t.search("Physical Mail send") >= 0 { return say("physical") }
+    if t.search("no native Mail review") >= 0 { return say("no_review") }
+    if t.search("There is no such message") >= 0 { return say("no_message") }
+    if t.search("may not use that account") >= 0 { return say("account_denied") }
+    if t.search("Enter one recipient") >= 0 { return say("one_recipient") }
+    if t.search("Sign-in cancelled") >= 0 { return say("signin_cancel") }
+    if t.search("Signing in needs") >= 0 { return say("signin_sheet") }
+    if t.search("Wrong password") >= 0 { return say("wrong_password") }
+    if t.search("no service answers") >= 0 { return say("no_service") }
+    if t.search("Unsupported composer") >= 0 { return say("composer") }
+    if t.search("expected_revision") >= 0 { return say("revision_required") }
+    if t.search("Submission status") >= 0 { return say("submission") }
+    if t.search("authorization_required") >= 0 { return say("cal_denied") }
+    if t.search("unsupported_platform") >= 0 { return say("cal_unsupported") }
+    if t.search("Calendar review closed") >= 0 || t.search("trusted_input_required") >= 0 { return say("cal_cancelled") }
+    if t.search("read_only") >= 0 { return say("cal_readonly") }
+    if t.search("host_not_configured") >= 0 { return say("cal_unconfigured") }
+    if t.search("foreground_required") >= 0 { return say("cal_foreground") }
+    if t.search("invalid_handle") >= 0 || t.search("calendar_changed") >= 0 { return say("no_calendar") }
+    if t.search("Invalid start_ms") >= 0 || t.search("Invalid end_ms") >= 0 || t.search("Time window") >= 0 || t.search("timezone") >= 0 { return say("bad_time") }
+    return say("unknown")
 }
 fn add_account(){
-    status("请在 OctoSense 弹出的面板上登录。")
-    ui.welcome_note.set_text("请在 OctoSense 弹出的面板上登录。")
+    status(say("signin_sheet"))
+    ui.welcome_note.set_text(say("signin_sheet"))
     host.request("mail.add_account", {}, fn(r){
         if r.is_ok { load_accounts() }
         else {
@@ -245,11 +403,18 @@ fn load_folders(id){
         }
     })
 }
-fn select_named(aid, fid, fname){
+fn select_named_now(aid, fid, fname){
     for a in accounts {
         if a.id == aid { account = a }
     }
-    folder = {id: fid name: fname}
+    let role = ""
+    let known = folders_by[aid]
+    if known != nil {
+        for item in known {
+            if item.id == fid && item.role != nil { role = item.role }
+        }
+    }
+    folder = {id: fid name: fname role: role}
     messages = []
     close_detail()
     show_heading()
@@ -258,19 +423,26 @@ fn select_named(aid, fid, fname){
     list()
     sync()
 }
+fn select_named(aid, fid, fname){
+    if ui.composer.visible() {
+        request_leave("folder", aid, fid, fname)
+        return
+    }
+    select_named_now(aid, fid, fname)
+}
 fn select_folder(a, f){
     select_named(a.id, f.id, f.name)
 }
 fn sync(){
     if account == nil || busy { return }
     busy = true
-    status("Checking for mail…")
+    status(say("checking"))
     host.request("mail.sync", {account: account.id folder: folder.id}, fn(r){
         busy = false
         if r.is_ok {
-            if r.data.new == 1 { status("1 new message") }
-            else if r.data.new > 0 { status("" + r.data.new + " new messages") }
-            else { status("Up to date") }
+            if r.data.new == 1 { status(say("one_new")) }
+            else if r.data.new > 0 { status("" + r.data.new + say("many_new")) }
+            else { status(say("up_to_date")) }
             list()
         } else { status(local_error(r.error)) }
     })
@@ -351,7 +523,7 @@ fn classify_some(){
     }
     let allowed = folder_names()
     classifying = true
-    status("Classifying the latest mail…")
+    status(say("classifying"))
     host.request("model.complete", {
         task: "Classify each email into one existing mailbox folder. For every line, reply with one line id|Folder. Folder must be copied exactly from the allowed list. Do not invent a folder name. Return every id. No other text."
         input: {allowed: allowed mail: batch}
@@ -385,8 +557,8 @@ fn classify_some(){
                     if classes[item.id] == item.folder { ok = ok + 1 }
                     else { miss = miss + 1 }
                 }
-                let note = "读回确认：" + ok + " 条分类与记录一致"
-                if miss > 0 { note = note + "，" + miss + " 条没有对上" }
+                let note = say("class_ok") + ok + say("class_match")
+                if miss > 0 { note = note + "，" + miss + say("class_miss") }
                 show_current(messages)
                 status(note)
             } else {
@@ -399,6 +571,29 @@ fn classify_some(){
         if got > 0 { classify_some() }
     })
 }
+fn mailbox_drafts(){
+    if account == nil { return nil }
+    let found = folders_by[account.id]
+    if found == nil { return nil }
+    for item in found {
+        if item.role == "drafts" { return item }
+    }
+    return nil
+}
+fn saved_draft_rows(){
+    let rows = []
+    if account == nil { return rows }
+    for d in local_drafts {
+        if d.account == account.id {
+            let sub = d.subject
+            if sub == nil || sub == "" { sub = "（无主题）" }
+            let who = d.to
+            if who == nil || who == "" { who = "未填写收件人" }
+            rows.push({id: d.id local_draft: true sender: who time: "草稿" subject: sub preview: clip(d.body, 90) unread: false})
+        }
+    }
+    return rows
+}
 fn list(){
     if account == nil { return }
     let wanted = "" + folder.id
@@ -410,10 +605,16 @@ fn list(){
         let raw = []
         if r.data != nil && r.data.messages != nil { raw = r.data.messages }
         if wanted == "INBOX" || wanted_name == "Inbox" { recent = raw }
+        if folder.role == "drafts" {
+            let merged = saved_draft_rows()
+            for m in raw { merged.push(m) }
+            raw = merged
+        }
         show_current(raw)
     })
 }
 fn open_message(m){
+    if m.local_draft == true { open_saved_draft(m.id); return }
     open_id = m.id
     host.request("mail.message", {account: account.id folder: folder.id message: m.id}, fn(r){
         if r.is_ok {
@@ -433,7 +634,7 @@ fn open_message(m){
                 names = names + a.filename + " (" + kb(a.size) + ")"
             }
             ui.r_attachments.set_visible(names != "")
-            ui.r_attachments.set_text("Attachments: " + names)
+            ui.r_attachments.set_text(say("attachments") + names)
             show_reader()
             m.unread = false
             host.request("mail.mark_read", {account: account.id folder: folder.id message: m.id}, fn(done){
@@ -445,15 +646,21 @@ fn open_message(m){
 fn compose(to, subject, body){
     compose_id = ""
     compose_revision = 0
+    editing_draft = ""
     compose_generation = compose_generation + 1
     preparing_review = false
     reply_message = ""
-    if compose_kind == "reply" && open_id != "" { reply_message = open_id }
+    reply_folder = ""
+    if compose_kind == "reply" && open_id != "" {
+        reply_message = open_id
+        if folder.id != "drafts" { reply_folder = folder.id }
+    }
     ui.c_to.set_text(to)
     ui.c_subject.set_text(subject)
     ui.c_body.set_text(body)
     ui.c_note.set_text("")
     show_composer()
+    touch_draft()
 }
 fn reply(){
     if reading == nil { return }
@@ -462,40 +669,320 @@ fn reply(){
     compose_kind = "reply"
     compose(reading.address, subject, "")
 }
-fn send_settled(generation, r){
-    if generation != compose_generation { return }
-    preparing_review = false
-    if r.is_ok && r.data != nil {
-        if r.data.compose_id != nil && r.data.compose_id != "" { compose_id = r.data.compose_id }
-        if r.data.revision != nil { compose_revision = r.data.revision }
-        if r.data.accepted == true {
-            ui.c_note.set_text("宿主已受理这封邮件。")
-            status("邮件已受理")
-            close_detail()
-            ui.rows.render()
+fn draft_status_zh(st){
+    let i = sys_slot()
+    if st == "draft" { return at5(i, "draft", "草稿", "brouillon", "下書き", "черновик") }
+    if st == "awaiting_approval" { return at5(i, "waiting for approval", "等待批准", "en attente d'accord", "承認待ち", "ожидает подтверждения") }
+    if st == "sending" { return at5(i, "sending", "正在发送", "envoi", "送信中", "отправка") }
+    if st == "accepted" { return at5(i, "accepted", "已受理", "accepté", "受付済み", "принято") }
+    if st == "outcome_unknown" { return at5(i, "result unknown", "结果不确定", "résultat inconnu", "結果不明", "результат неизвестен") }
+    if st == "failed_before_delivery" { return at5(i, "failed before sending", "发送前失败", "échec avant l'envoi", "送信前に失敗", "сбой до отправки") }
+    if st == "cancelled" { return at5(i, "cancelled", "已取消", "annulé", "取消", "отменено") }
+    if st == nil || st == "" { return at5(i, "unknown", "未知", "inconnu", "不明", "неизвестно") }
+    return "" + st
+}
+fn source_folder(){
+    if reply_folder != "" { return reply_folder }
+    if folder.id == "" || folder.id == "drafts" { return "INBOX" }
+    return folder.id
+}
+fn email_ok(text){
+    let t = text.trim()
+    if t.search("@") < 1 { return false }
+    if t.search(" ") >= 0 { return false }
+    if t.search(",") >= 0 { return false }
+    if t.search(";") >= 0 { return false }
+    return true
+}
+fn composer_dirty(){
+    if !ui.composer.visible() { return false }
+    if ui.c_to.text().trim() != "" { return true }
+    if ui.c_subject.text().trim() != "" { return true }
+    if ui.c_body.text().trim() != "" { return true }
+    return false
+}
+fn remember_compose(r){
+    if !r.is_ok || r.data == nil { return false }
+    if r.data.compose_id != nil && r.data.compose_id != "" { compose_id = r.data.compose_id }
+    if r.data.revision != nil { compose_revision = r.data.revision }
+    return true
+}
+fn refresh_compose_status(){
+    if account == nil || compose_id == "" {
+        send_after_status = false
+        retry_save = false
+        return
+    }
+    let generation = compose_generation
+    host.request("mail.compose_status", {account: account.id compose_id: compose_id}, fn(r){
+        if generation != compose_generation { return }
+        if remember_compose(r) {
+            let st = ""
+            if r.data.status != nil { st = "" + r.data.status }
+            ui.c_note.set_text(say("draft_checked") + draft_status_zh(st) + say("same_draft"))
+            if retry_save {
+                retry_save = false
+                save_host_draft()
+            }
+            if send_after_status {
+                send_after_status = false
+                send()
+            }
+            return
+        }
+        send_after_status = false
+        retry_save = false
+        ui.c_note.set_text(local_error(r.error))
+    })
+}
+fn host_draft_settled(r){
+    draft_saving = false
+    if save_generation != compose_generation { return }
+    if remember_compose(r) {
+        ui.c_note.set_text(say("draft_saved"))
+        if retry_save {
+            retry_save = false
+            save_host_draft()
+        }
+        return
+    }
+    let err = ""
+    if r.error != nil { err = "" + r.error }
+    if err.search("revision_conflict") >= 0 || err.search("expected_revision") >= 0 {
+        retry_save = true
+        refresh_compose_status()
+    }
+}
+fn save_host_draft(){
+    if account == nil || preparing_review || !ui.composer.visible() { return }
+    let to = ui.c_to.text().trim()
+    if !email_ok(to) { return }
+    if draft_saving {
+        retry_save = true
+        return
+    }
+    if compose_id != "" && !(compose_revision > 0) {
+        retry_save = true
+        refresh_compose_status()
+        return
+    }
+    draft_saving = true
+    save_generation = compose_generation
+    let subject = ui.c_subject.text()
+    let body = ui.c_body.text()
+    let src = source_folder()
+    if compose_id == "" {
+        host.request("mail.compose", {account: account.id to: to subject: subject body: body folder: src message: reply_message}, fn(r){ host_draft_settled(r) })
+    } else {
+        host.request("mail.compose", {account: account.id compose_id: compose_id expected_revision: compose_revision to: to subject: subject body: body folder: src message: reply_message}, fn(r){ host_draft_settled(r) })
+    }
+}
+fn touch_draft(){
+    draft_save_gen = draft_save_gen + 1
+    let token = draft_save_gen
+    start_timeout(0.6, || {
+        if token != draft_save_gen { return }
+        save_host_draft()
+    })
+}
+fn load_local_drafts(){
+    local_drafts = []
+    if !fs.exists("drafts.txt") { return }
+    let lines = fs.read("drafts.txt").split("\n")
+    for line in lines {
+        if line == "" { continue }
+        let bits = line.split("|")
+        if bits.len() >= 6 {
+            let msg = ""
+            let src = ""
+            if bits.len() >= 7 { msg = unpack(bits[6]) }
+            if bits.len() >= 8 { src = unpack(bits[7]) }
+            local_drafts.push({id: unpack(bits[0]) account: unpack(bits[1]) to: unpack(bits[2]) subject: unpack(bits[3]) body: unpack(bits[4]) compose_id: unpack(bits[5]) message: msg folder: src category: "Drafts"})
+        }
+    }
+}
+fn save_local_drafts(){
+    let text = ""
+    for d in local_drafts {
+        if text != "" { text = text + "\n" }
+        let msg = ""
+        let src = ""
+        if d.message != nil { msg = d.message }
+        if d.folder != nil { src = d.folder }
+        text = text + pack(d.id) + "|" + pack(d.account) + "|" + pack(d.to) + "|" + pack(d.subject) + "|" + pack(d.body) + "|" + pack(d.compose_id) + "|" + pack(msg) + "|" + pack(src)
+    }
+    fs.write("drafts.txt", text)
+}
+fn store_local_draft(){
+    if account == nil { return }
+    let id = editing_draft
+    if id == "" { id = compose_id }
+    if id == "" { id = "local-" + local_drafts.len() + "-" + compose_generation }
+    let msg = reply_message
+    let src = source_folder()
+    let row = {id: id account: account.id to: ui.c_to.text() subject: ui.c_subject.text() body: ui.c_body.text() compose_id: compose_id message: msg folder: src category: "Drafts"}
+    let next = []
+    let replaced = false
+    for d in local_drafts {
+        if d.id == id {
+            next.push(row)
+            replaced = true
+        } else { next.push(d) }
+    }
+    if !replaced { next.push(row) }
+    local_drafts = next
+    editing_draft = id
+    save_local_drafts()
+    save_host_draft()
+    status(say("saved_drafts"))
+}
+fn drop_saved_draft(){
+    let next = []
+    for d in local_drafts {
+        let drop = false
+        if editing_draft != "" && d.id == editing_draft { drop = true }
+        if compose_id != "" && d.compose_id == compose_id { drop = true }
+        if !drop { next.push(d) }
+    }
+    local_drafts = next
+    save_local_drafts()
+    editing_draft = ""
+}
+fn open_saved_draft(id){
+    for d in local_drafts {
+        if d.id != id { continue }
+        compose_kind = "new"
+        reply_message = ""
+        reply_folder = ""
+        open_id = ""
+        if d.message != nil && d.message != "" {
+            compose_kind = "reply"
+            reply_message = d.message
+            open_id = d.message
+            if d.folder != nil { reply_folder = d.folder }
+        }
+        compose_id = ""
+        if d.compose_id != nil { compose_id = d.compose_id }
+        compose_revision = 0
+        editing_draft = d.id
+        compose_generation = compose_generation + 1
+        preparing_review = false
+        ui.c_to.set_text(d.to)
+        ui.c_subject.set_text(d.subject)
+        ui.c_body.set_text(d.body)
+        ui.c_note.set_text(say("opened_draft"))
+        show_composer()
+        if compose_id != "" { refresh_compose_status() }
+        return
+    }
+}
+fn perform_leave(kind, aid, fid, fname){
+    if kind == "folder" { select_named_now(aid, fid, fname); return }
+    if kind == "settings" {
+        close_detail()
+        show_settings()
+        return
+    }
+    close_detail()
+    ui.rows.render()
+}
+fn request_leave(kind, aid, fid, fname){
+    if preparing_review {
+        ui.c_note.set_text(say("reviewing"))
+        return
+    }
+    if !composer_dirty() {
+        perform_leave(kind, aid, fid, fname)
+        return
+    }
+    leave_kind = kind
+    leave_aid = aid
+    leave_fid = fid
+    leave_fname = fname
+    leave_step = 1
+    ui.draft_title.set_text(say("leave_title"))
+    ui.draft_body.set_text(say("leave_body"))
+    ui.draft_no_label.set_text(say("dont_save"))
+    ui.draft_yes_label.set_text(say("save_drafts"))
+    ui.draft_ask.set_visible(true)
+}
+fn draft_no(){
+    if leave_step == 2 {
+        ui.draft_ask.set_visible(false)
+        leave_step = 0
+        return
+    }
+    ui.draft_ask.set_visible(false)
+    leave_step = 0
+    perform_leave(leave_kind, leave_aid, leave_fid, leave_fname)
+}
+fn draft_yes(){
+    if leave_step == 1 {
+        leave_step = 2
+        ui.draft_title.set_text(say("confirm_again"))
+        ui.draft_body.set_text(say("confirm_body"))
+        ui.draft_no_label.set_text(say("back_compose"))
+        ui.draft_yes_label.set_text(say("confirm_save"))
+        return
+    }
+    ui.draft_ask.set_visible(false)
+    leave_step = 0
+    store_local_draft()
+    if leave_kind == "inbox" {
+        let box = mailbox_drafts()
+        if box != nil && account != nil {
+            select_named_now(account.id, box.id, box.name)
             return
         }
     }
-    if r.is_ok {
-        ui.c_note.set_text("审阅已结束，但邮件还没有被受理。请先查看草稿状态，不要自动再发一次。")
+    perform_leave(leave_kind, leave_aid, leave_fid, leave_fname)
+}
+fn send_settled(generation, r){
+    if generation != compose_generation { return }
+    preparing_review = false
+    remember_compose(r)
+    if r.is_ok && r.data != nil && r.data.accepted == true {
+        ui.c_note.set_text(say("accepted"))
+        status(say("accepted_short"))
+        drop_saved_draft()
+        close_detail()
+        ui.rows.render()
         return
     }
+    if r.is_ok {
+        ui.c_note.set_text(say("review_unsent"))
+        refresh_compose_status()
+        return
+    }
+    let err = ""
+    if r.error != nil { err = "" + r.error }
     ui.c_note.set_text(local_error(r.error))
+    if compose_id != "" || err.search("revision_conflict") >= 0 || err.search("Submission status") >= 0 || err.search("outcome") >= 0 {
+        refresh_compose_status()
+    }
 }
 fn send(){
     if account == nil || preparing_review { return }
+    if compose_id != "" && !(compose_revision > 0) {
+        send_after_status = true
+        ui.c_note.set_text(say("checking_draft"))
+        refresh_compose_status()
+        return
+    }
     preparing_review = true
+    draft_save_gen = draft_save_gen + 1
     let generation = compose_generation
-    ui.c_note.set_text("正在打开宿主审阅…")
+    ui.c_note.set_text(say("opening_review"))
     let to = ui.c_to.text()
     let subject = ui.c_subject.text()
     let body = ui.c_body.text()
+    let src = source_folder()
     if compose_id == "" {
-        host.request("mail.review_send", {account: account.id to: to subject: subject body: body folder: folder.id message: reply_message}, fn(r){
+        host.request("mail.review_send", {account: account.id to: to subject: subject body: body folder: src message: reply_message}, fn(r){
             send_settled(generation, r)
         })
     } else {
-        host.request("mail.review_send", {account: account.id compose_id: compose_id expected_revision: compose_revision to: to subject: subject body: body folder: folder.id message: reply_message}, fn(r){
+        host.request("mail.review_send", {account: account.id compose_id: compose_id expected_revision: compose_revision to: to subject: subject body: body folder: src message: reply_message}, fn(r){
             send_settled(generation, r)
         })
     }
@@ -540,10 +1027,21 @@ fn show_settings(){
 }
 fn open_settings(){
     commit_rename()
+    if ui.composer.visible() {
+        request_leave("settings", "", "", "")
+        return
+    }
     if ui.settings_pane.visible() { close_detail(); return }
     show_settings()
 }
-fn back_to_inbox(){ close_detail(); ui.rows.render() }
+fn back_to_inbox(){
+    if ui.composer.visible() {
+        request_leave("inbox", "", "", "")
+        return
+    }
+    close_detail()
+    ui.rows.render()
+}
 fn kb(n){
     if n > 1000000 { return "" + floor(n / 100000) / 10 + " MB" }
     return "" + (floor(n / 1000) + 1) + " KB"
@@ -570,14 +1068,14 @@ fn take_answer(r){
     return "模型没有返回内容。"
 }
 fn refresh_provider(){
-    ui.api_status.set_text("Testing the connection…")
+    ui.api_status.set_text(say("testing"))
     host.request("model.complete", {
         task: "Reply with the word ok."
         input: {ping: "ok"}
         schema: answer_schema()
         class: "fast"
     }, fn(s){
-        if s.is_ok { ui.api_status.set_text("Connected · using the model in AI providers") }
+        if s.is_ok { ui.api_status.set_text(say("connected")) }
         else { ui.api_status.set_text(local_error(s.error)) }
     })
 }
@@ -597,13 +1095,16 @@ fn plan_schema(){
         }}
 }
 fn event_schema(){
-    return {type: "object" required: ["found" "title" "start" "end" "location"] additionalProperties: false
+    return {type: "object" required: ["found" "title" "start" "end" "location" "start_ms" "end_ms" "timezone"] additionalProperties: false
         properties: {
             found: {type: "string" enum: ["yes" "no"]}
             title: {type: "string" maxLength: 200}
             start: {type: "string" maxLength: 80}
             end: {type: "string" maxLength: 80}
             location: {type: "string" maxLength: 200}
+            start_ms: {type: "integer"}
+            end_ms: {type: "integer"}
+            timezone: {type: "string" maxLength: 80}
         }}
 }
 fn translate_schema(){
@@ -700,8 +1201,72 @@ fn refresh_lang_face(){
 }
 fn toggle_lang_menu(){
     lang_open = !lang_open
+    if lang_open { sys_open = false; ui.sys_menu.set_visible(false); refresh_sys_face() }
     ui.lang_menu.set_visible(lang_open)
     refresh_lang_face()
+}
+fn apply_chrome(){
+    ui.sys_title.set_text(say("sys_title"))
+    ui.sys_hint.set_text(say("ui_hint"))
+    ui.trans_title.set_text(say("trans_title"))
+    ui.trans_hint.set_text(say("trans_hint"))
+    ui.settings_title.set_text(say("settings"))
+    ui.tab_accounts.set_text(say("accounts"))
+    ui.tab_system.set_text(say("system"))
+    ui.btn_refresh.set_text(say("refresh"))
+    ui.btn_compose.set_text(say("compose"))
+    ui.btn_back.set_text(say("back"))
+    ui.translate_btn.set_text(say("translate"))
+    ui.btn_recognize.set_text(say("recognize"))
+    ui.btn_reply.set_text(say("reply"))
+    ui.btn_cancel.set_text(say("cancel"))
+    ui.btn_draft.set_text(say("draft"))
+    ui.btn_send.set_text(say("send"))
+    ui.btn_settings_back.set_text(say("back"))
+    ui.c_to.set_empty_text(say("to"))
+    ui.c_subject.set_empty_text(say("subject"))
+    ui.c_body.set_empty_text(say("message"))
+    ui.welcome_lead.set_text(say("welcome"))
+    ui.btn_add_welcome.set_text(say("add_account"))
+    ui.btn_add_rail.set_text(say("add_account"))
+    ui.api_title.set_text("API")
+    ui.api_body.set_text(say("api_body"))
+    ui.btn_test.set_text(say("test"))
+    ui.confirm_title.set_text(say("remove_ask"))
+    ui.btn_remove_cancel.set_text(say("cancel"))
+    ui.agent_title.set_text(say("agent"))
+    ui.agent_input.set_empty_text(say("ask"))
+    ui.btn_ask_send.set_text(say("send"))
+    ui.btn_new_chat.set_text(say("new_chat"))
+    ui.draft_prompt.set_text(say("draft_prompt"))
+    ui.draft_idea.set_empty_text(say("let_ai"))
+    ui.btn_draft_cancel.set_text(say("cancel"))
+    ui.btn_draft_send.set_text(say("send"))
+    ui.custom_field.set_empty_text(say("lang_name"))
+    ui.rows.render()
+    ui.settings_accounts.render()
+    ui.rail_slot.render()
+    ui.chat_view.render()
+    ui.history_list.render()
+}
+fn refresh_sys_face(){
+    ui.sys_name.set_text(sys_lang)
+    apply_chrome()
+    if sys_open { ui.sys_mark.set_text("▴") }
+    else { ui.sys_mark.set_text("▾") }
+}
+fn toggle_sys_menu(){
+    sys_open = !sys_open
+    if sys_open { lang_open = false; ui.lang_menu.set_visible(false); refresh_lang_face() }
+    ui.sys_menu.set_visible(sys_open)
+    refresh_sys_face()
+}
+fn pick_sys(i){
+    sys_lang = sys_labels[i]
+    sys_open = false
+    ui.sys_menu.set_visible(false)
+    fs.write("syslang.txt", sys_lang)
+    refresh_sys_face()
 }
 fn pick_lang(i){
     let name = lang_labels[i]
@@ -785,15 +1350,15 @@ fn event_readback(title, start){
         if e.title == title && e.start == start {
             let place = e.location
             if place == nil { place = "" }
-            let line = "读回确认：" + e.title + " | " + e.start + " – " + e.end
+            let line = say("readback") + e.title + " | " + e.start + " – " + e.end
             if place != "" { line = line + " | " + place }
             return line
         }
     }
-    return "读回失败：写入后没有在日程记录里找到「" + title + "」。"
+    return say("readback_fail")
 }
 fn commit_event(){
-    if pending_event == nil { return "没有等待写入的日程。" }
+    if pending_event == nil { return say("no_pending") }
     let title = pending_event.title
     let start = pending_event.start
     let end = pending_event.end
@@ -805,12 +1370,95 @@ fn commit_event(){
     if location != "" { shown = shown + "\n" + location }
     if event_saved(title, start) {
         pending_event = nil
-        return "日程里已经有这一条。\n" + shown + "\n" + event_readback(title, start)
+        return say("already_cal") + "\n" + shown + "\n" + event_readback(title, start)
     }
     saved_events.push({title: title start: start end: end location: location key: key})
     save_events()
     pending_event = nil
-    return "已加入日程。\n" + shown + "\n" + event_readback(title, start)
+    return say("added_cal") + "\n" + shown + "\n" + event_readback(title, start)
+}
+fn load_calendar(){
+    calendar_handle = ""
+    if fs.exists("calendar.txt") { calendar_handle = fs.read("calendar.txt").trim() }
+}
+fn save_calendar(handle){
+    calendar_handle = handle
+    fs.write("calendar.txt", handle)
+}
+fn begin_device_event(){
+    if pending_event == nil { finish_tool(say("no_pending")); return }
+    let title = pending_event.title
+    let start = pending_event.start
+    if event_saved(title, start) { finish_tool(commit_event()); return }
+    if !(pending_event.start_ms > 1000000000000) || !(pending_event.end_ms > pending_event.start_ms) {
+        finish_tool(commit_event() + "\n" + say("bad_time"))
+        return
+    }
+    calendar_retried = false
+    agent_busy = true
+    ui.agent_note.set_text(say("thinking"))
+    ensure_calendar()
+}
+fn ensure_calendar(){
+    host.request("device_calendar.permission.status", {}, fn(r){
+        if !r.is_ok { finish_tool(local_error(r.error)); return }
+        let granted = false
+        if r.data != nil && r.data.app_consent == true && ("" + r.data.os_permission) == "granted" { granted = true }
+        if granted { pick_calendar(); return }
+        host.request("device_calendar.permission.request", {}, fn(p){
+            if !p.is_ok { finish_tool(local_error(p.error)); return }
+            pick_calendar()
+        })
+    })
+}
+fn pick_calendar(){
+    if calendar_handle != "" { create_os_event(); return }
+    host.request("device_calendar.calendars.list", {}, fn(r){
+        if !r.is_ok { finish_tool(local_error(r.error)); return }
+        let id = ""
+        if r.data != nil && r.data.calendars != nil {
+            for c in r.data.calendars {
+                if id == "" && c.writable == true { id = c.id }
+            }
+        }
+        if id == "" { finish_tool(say("no_calendar")); return }
+        host.request("device_calendar.calendars.select", {calendar_id: id}, fn(s){
+            if !s.is_ok { finish_tool(local_error(s.error)); return }
+            if s.data == nil || s.data.handle == nil || s.data.handle == "" {
+                finish_tool(say("no_calendar"))
+                return
+            }
+            save_calendar(s.data.handle)
+            create_os_event()
+        })
+    })
+}
+fn create_os_event(){
+    if pending_event == nil { finish_tool(say("no_pending")); return }
+    let tz = pending_event.timezone
+    if tz == nil || tz == "" { tz = "Asia/Shanghai" }
+    let place = pending_event.location
+    if place == nil { place = "" }
+    let ev = {title: pending_event.title start_ms: pending_event.start_ms end_ms: pending_event.end_ms timezone: tz location: place notes: ""}
+    host.request("device_calendar.events.create", {handle: calendar_handle event: ev}, fn(r){
+        if !r.is_ok {
+            let err = ""
+            if r.error != nil { err = "" + r.error }
+            if !calendar_retried && err.search("invalid_handle") >= 0 {
+                calendar_retried = true
+                save_calendar("")
+                pick_calendar()
+                return
+            }
+            finish_tool(local_error(r.error))
+            return
+        }
+        if r.data == nil || r.data.saved != true {
+            finish_tool(say("cal_cancelled"))
+            return
+        }
+        finish_tool(commit_event() + "\n" + say("os_saved"))
+    })
 }
 fn agrees(text){
     let t = text.trim()
@@ -1096,7 +1744,7 @@ fn react_next(){
         return
     }
     react_step = react_step + 1
-    ui.agent_note.set_text("Thinking…")
+    ui.agent_note.set_text(say("thinking"))
     host.request("model.complete", {
         task: "You are AgentMail in a ReAct loop. The language field is the person's chosen language. Write answer in that language. Write any email subject and body you put in subject and body in that language too. Current screen: the value of screen. You can open the mail list, one message, the reply composer, or the new-message composer. tools is a comma-separated list run in order, or empty. Tools: read_message, read_mailbox, read_range, summarize, translate, show_original, find_event, add_event, open_reply, open_compose, write_reply, write_mail, open_mail, classify, classify_more. classify sorts the latest 100 messages into the account's existing folders, and only when the user asks. classify_more does the next 100, and only when the user asks for more. Never classify on your own. find_event reads a schedule from the open mail. add_event writes the schedule already in the pending field, and only after the user has agreed in their own later message. When the question is Recognize, call summarize then find_event before Finish. If a schedule was found, the answer must show its title, start, end, and location, then ask whether to add it. Do not call add_event during Recognize. When the user agrees, call add_event. History is the earlier chat. Use it, and use pending, so you know which schedule they mean. For write_reply and write_mail put the draft in to, subject, and body. For open_mail put words from the subject or sender in query. since, until, and span are only for read_range. After you see an observation, you may return another list. Set stop to Finish or 结束 only when answer is the reply for the user. Do not put Finish inside answer."
         input: {question: pending_q screen: screen_now() open: open_hint() language: target_lang history: clip(history_text(), 4000) pending: event_brief() observations: clip(react_trace, 6000) step: react_step}
@@ -1198,7 +1846,7 @@ fn tool_summarize(){
     }
     if react_step >= 10 { finish_tool("Step limit reached before summarize."); return }
     react_step = react_step + 1
-    ui.agent_note.set_text("Thinking…")
+    ui.agent_note.set_text(say("thinking"))
     host.request("model.complete", {
         task: "Summarize this email in " + target_lang + ". Put only the summary in answer. Do not invent facts."
         input: {subject: reading.subject from: reading.sender body: clip(reading.body, 6000)}
@@ -1215,10 +1863,10 @@ fn tool_find_event(){
     if reading == nil { pending_event = nil; finish_tool("No schedule. No message is open."); return }
     if react_step >= 10 { finish_tool("Step limit reached before the schedule check."); return }
     react_step = react_step + 1
-    ui.agent_note.set_text("Thinking…")
+    ui.agent_note.set_text(say("thinking"))
     let key = mail_key()
     host.request("model.complete", {
-        task: "Decide whether this email contains one calendar event, such as a meeting, appointment, delivery window, flight, reservation, or a deadline that has a date or a time. If it does, set found to yes and copy the title, start, end, and location from the mail. Keep the dates and times that are written in the mail. If an end is missing, leave end empty. If there is no schedule, set found to no and leave the other fields empty. Do not invent a time or a place."
+        task: "Decide whether this email contains one calendar event, such as a meeting, appointment, delivery window, flight, reservation, or a deadline that has a date or a time. If it does, set found to yes and copy the title, start, end, and location from the mail. Also set start_ms and end_ms to Unix milliseconds for those times, and timezone to an IANA name such as Asia/Shanghai. If the end is missing, set end_ms to one hour after start_ms. If there is no schedule, set found to no, start_ms and end_ms to 0, and leave the other fields empty. Do not invent a time or a place."
         input: {subject: reading.subject from: reading.sender body: clip(strip_tags(reading.body), 6000)}
         schema: event_schema()
         class: "fast"
@@ -1230,19 +1878,25 @@ fn tool_find_event(){
         let start = ""
         let end = ""
         let location = ""
+        let start_ms = 0
+        let end_ms = 0
+        let timezone = "Asia/Shanghai"
         if r.data != nil && r.data.output != nil {
             if r.data.output.found != nil { found = r.data.output.found }
             if r.data.output.title != nil { title = r.data.output.title }
             if r.data.output.start != nil { start = r.data.output.start }
             if r.data.output.end != nil { end = r.data.output.end }
             if r.data.output.location != nil { location = r.data.output.location }
+            if r.data.output.start_ms != nil { start_ms = r.data.output.start_ms }
+            if r.data.output.end_ms != nil { end_ms = r.data.output.end_ms }
+            if r.data.output.timezone != nil && r.data.output.timezone != "" { timezone = r.data.output.timezone }
         }
         if found != "yes" || title == "" || start == "" {
             pending_event = nil
             finish_tool("No schedule in this mail.")
             return
         }
-        pending_event = {title: title start: start end: end location: location key: key}
+        pending_event = {title: title start: start end: end location: location key: key start_ms: start_ms end_ms: end_ms timezone: timezone}
         finish_tool("Schedule found. Title: " + title + ". Start: " + start + ". End: " + end + ". Location: " + location + ". Show these fields and ask whether to add the event. Do not add it yet.")
     })
 }
@@ -1255,7 +1909,7 @@ fn tool_add_event(){
         finish_tool("No schedule is waiting. Use the chat history and call find_event on the open mail before adding.")
         return
     }
-    finish_tool(commit_event())
+    begin_device_event()
 }
 fn tool_translate(){
     if reading == nil { finish_tool("No message is open, so it was not translated."); return }
@@ -1273,7 +1927,7 @@ fn tool_translate(){
     react_step = react_step + 1
     trans_busy = true
     refresh_translate_btn()
-    ui.agent_note.set_text("Thinking…")
+    ui.agent_note.set_text(say("thinking"))
     host.request("model.complete", {
         task: "Translate the subject and the body into the target language. Put the translated subject in subject and the translated body in text. Do not include the original. If both are already in that language, set status to already and leave subject and text empty."
         input: {language: target_lang subject: reading.subject body: clip(reading.body, 6000)}
@@ -1435,7 +2089,7 @@ fn send_draft_idea(){
 fn ask_draft(idea){
     if agent_busy || account == nil { return }
     if compose_kind == "reply" || ui.reader.visible() {
-        if reading == nil { ui.agent_note.set_text("Open a message first."); return }
+        if reading == nil { ui.agent_note.set_text(say("open_first")); return }
         let subject = reading.subject
         if subject.search("Re:") != 0 { subject = "Re: " + subject }
         compose_kind = "reply"
@@ -1449,7 +2103,7 @@ fn ask_draft(idea){
     chat_log.push({role: "user" text: idea})
     paint_chat()
     agent_busy = true
-    ui.agent_note.set_text("Thinking…")
+    ui.agent_note.set_text(say("thinking"))
     let mail = ""
     if reading != nil { mail = message_context() }
     host.request("model.complete", {
@@ -1500,7 +2154,7 @@ fn begin_tool(label){
 }
 fn click_translate(){
     if trans_busy { return }
-    if reading == nil { show_agent(); ui.agent_note.set_text("Open a message first."); return }
+    if reading == nil { show_agent(); ui.agent_note.set_text(say("open_first")); return }
     if view_trans[mail_key()] == "1" {
         view_trans[mail_key()] = ""
         paint_mail()
@@ -1514,15 +2168,15 @@ fn click_translate(){
     agent_busy = false
     trans_busy = true
     refresh_translate_btn()
-    ui.agent_note.set_text("Thinking…")
+    ui.agent_note.set_text(say("thinking"))
     tool_translate()
 }
 fn click_recognize(){
     begin_tool("Recognize")
 }
 fn ask_agent(text){
-    if agent_busy { ui.agent_note.set_text("Still working…"); return }
-    if account == nil { ui.agent_note.set_text("Add an account first."); return }
+    if agent_busy { ui.agent_note.set_text(say("still_working")); return }
+    if account == nil { ui.agent_note.set_text(say("need_account")); return }
     let q = pending_input.trim()
     if text != nil {
         let given = ("" + text).trim()
@@ -1541,19 +2195,19 @@ fn ask_agent(text){
     paint_chat()
     show_agent()
     if pending_event != nil && agrees(q) {
-        finish_turn(commit_event())
+        begin_device_event()
         return
     }
     if pending_event != nil && declines(q) {
         pending_event = nil
-        finish_turn("没有加入日程。")
+        finish_turn(say("not_added"))
         return
     }
     agent_busy = true
     react_next()
 }
 
-start_timeout(0.05, || { load_accounts(); load_prefs() })
+start_timeout(0.05, || { load_accounts(); load_prefs(); load_local_drafts(); load_calendar() })
 
 let ink = #x1c1c1e
 let secondary = #x8e8e93
@@ -1581,9 +2235,9 @@ let RowRead = Row{top +: {sender +: {draw_text.text_style: theme.font_regular{fo
 SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
     welcome := View{width: Fill height: Fill flow: Down align: Align{x: 0.5 y: 0.5} spacing: 12 padding: 32
         Label{text: "AgentMail" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 32}}
-        Label{width: Fill align: Align{x: 0.5} text: "Add an account to read and send mail. OctoSense keeps your password; AgentMail never sees it."
+        welcome_lead := Label{width: Fill align: Align{x: 0.5} text: "添加账号后即可收发邮件。密码由 OctoSense 保管，AgentMail 看不到。"
             draw_text.color: secondary draw_text.text_style.font_size: 13}
-        ButtonFlat{text: "Add account" height: 44 padding: Inset{left: 22 right: 22} on_click: || add_account()
+        btn_add_welcome := ButtonFlat{text: "添加账号" height: 44 padding: Inset{left: 22 right: 22} on_click: || add_account()
             draw_bg +: {border_radius: 22.0 color: #x007aff color_hover: #x0a84ff color_down: #x0062cc border_size: 0.0}
             draw_text +: {color: #xffffff color_hover: #xffffff color_down: #xffffff text_style +: {font_size: 15}}}
         welcome_note := Label{width: Fill align: Align{x: 0.5} text: "" draw_text.color: secondary draw_text.text_style.font_size: 12}
@@ -1606,7 +2260,7 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
                                 if is_open(a.id) {
                                     let found = folders_by[a.id]
                                     if found == nil {
-                                        Label{padding: Inset{left: 28} text: "Loading…" draw_text.color: secondary draw_text.text_style.font_size: 12}
+                                        Label{padding: Inset{left: 28} text: say("loading") draw_text.color: secondary draw_text.text_style.font_size: 12}
                                     } else for f in found {
                                         let fid = "" + f.id
                                         let fname = "" + f.name
@@ -1626,7 +2280,7 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
                             GestureView{width: Fill height: Fill on_tap: |x, y| commit_rename()}
                         }
                         View{width: Fill height: Fit flow: Right align: Align{y: 0.5} padding: Inset{left: 8 right: 8 bottom: 10} spacing: 2
-                            ButtonFlat{text: "Add account" width: Fill height: 36 on_click: || { commit_rename(); add_account() }
+                            btn_add_rail := ButtonFlat{text: "添加账号" width: Fill height: 36 on_click: || { commit_rename(); add_account() }
                                 draw_bg +: {color: #x00000000 color_hover: #x00000018 color_down: #x00000028 border_size: 0.0 border_radius: 8.0}
                                 draw_text +: {color: accent color_hover: accent color_down: accent text_style +: {font_size: 14}}}
                             ButtonFlat{text: "⚙️" width: 40 height: 40 padding: Inset{left: 0 right: 0 top: 0 bottom: 0} on_click: || open_settings()
@@ -1668,9 +2322,9 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
         View{width: Fill height: Fill flow: Overlay
             list_pane := View{width: Fill height: Fill flow: Down
                 View{width: Fill height: Fit flow: Right align: Align{y: 0.5} padding: Inset{left: 8 right: 8 top: 8}
-                    Bar{text: "Refresh" on_click: || sync()}
+                    btn_refresh := Bar{text: "刷新" on_click: || sync()}
                     View{width: Fill height: 1}
-                    Bar{text: "Compose" on_click: || { compose_kind = "new"; compose("", "", "") }}
+                    btn_compose := Bar{text: "写信" on_click: || { compose_kind = "new"; compose("", "", "") }}
                 }
                 View{width: Fill height: Fit flow: Down padding: Inset{left: 16 right: 16 bottom: 6} spacing: 2
                     title := Label{text: "Inbox" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 30}}
@@ -1678,12 +2332,12 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
                     status := Label{text: "" draw_text.color: secondary draw_text.text_style.font_size: 12}
                 }
                 rows_empty := View{visible: false width: Fill height: 160 align: Align{x: 0.5 y: 0.5}
-                    Label{text: "No mail yet." draw_text.color: secondary draw_text.text_style.font_size: 13}
+                    Label{text: say("no_mail") draw_text.color: secondary draw_text.text_style.font_size: 13}
                 }
                 rows := ScrollYView{width: Fill height: Fill flow: Down on_render: || {
                     if messages.len() == 0 {
                         View{width: Fill height: 160 align: Align{x: 0.5 y: 0.5}
-                            Label{text: "No mail yet." draw_text.color: secondary draw_text.text_style.font_size: 13}}
+                            Label{text: say("no_mail") draw_text.color: secondary draw_text.text_style.font_size: 13}}
                     }
                     else for m in messages {
                         if m.unread {
@@ -1697,11 +2351,11 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
             }
             reader := SolidView{visible: false width: Fill height: Fill flow: Down new_batch: true draw_bg.color: #xffffff
         View{width: Fill height: Fit flow: Right align: Align{y: 0.5} padding: Inset{left: 8 right: 8 top: 8}
-            Bar{text: "‹ Back" on_click: || back_to_inbox()}
+            btn_back := Bar{text: "‹ 返回" on_click: || back_to_inbox()}
             View{width: Fill height: 1}
-            translate_btn := Bar{text: "Translate" on_click: || click_translate()}
-            Bar{text: "Recognize" on_click: || click_recognize()}
-            Bar{text: "Reply" on_click: || reply()}
+            translate_btn := Bar{text: "翻译" on_click: || click_translate()}
+            btn_recognize := Bar{text: "识别" on_click: || click_recognize()}
+            btn_reply := Bar{text: "回复" on_click: || reply()}
         }
         ScrollYView{width: Fill height: Fill flow: Down padding: 16 spacing: 6
             r_subject := Label{width: Fill text: "" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 20}}
@@ -1719,37 +2373,37 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
     }
     composer := SolidView{visible: false width: Fill height: Fill flow: Down new_batch: true draw_bg.color: #ffffff padding: Inset{left: 12 right: 12 top: 8} spacing: 8
         View{width: Fill height: Fit flow: Right align: Align{y: 0.5}
-            Bar{text: "Cancel" on_click: || back_to_inbox()}
+            btn_cancel := Bar{text: "取消" on_click: || back_to_inbox()}
             View{width: Fill height: 1}
-            Bar{text: "Draft" on_click: || open_draft_sheet()}
-            Bar{text: "Send" on_click: || send()}
+            btn_draft := Bar{text: "草稿" on_click: || open_draft_sheet()}
+            btn_send := Bar{text: "发送" on_click: || send()}
         }
-        c_to := Field{empty_text: "To"}
-        c_subject := Field{empty_text: "Subject"}
-        c_body := Field{height: 260 empty_text: "Message"}
+        c_to := Field{empty_text: "收件人" on_change: |text| touch_draft()}
+        c_subject := Field{empty_text: "主题" on_change: |text| touch_draft()}
+        c_body := Field{is_multiline: true width: Fill height: Fill empty_text: "正文" padding: Inset{left: 14 right: 14 top: 12 bottom: 12} on_change: |text| touch_draft()}
         c_note := Label{width: Fill text: "" draw_text.color: #xff3b30 draw_text.text_style.font_size: 12}
     }
             settings_pane := SolidView{visible: false width: Fill height: Fill flow: Down draw_bg.color: #xffffff padding: Inset{left: 16 right: 16 top: 8 bottom: 16} spacing: 12
                 View{width: Fill height: Fit flow: Right align: Align{y: 0.5}
-                    Bar{text: "‹ Back" on_click: || close_detail()}
+                    btn_settings_back := Bar{text: "‹ 返回" on_click: || close_detail()}
                     View{width: Fill height: 1}
-                    Label{text: "Settings" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 20}}
+                    settings_title := Label{text: "设置" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 20}}
                 }
                 View{width: Fill height: Fit flow: Right
-                    Bar{text: "Accounts" on_click: || show_tab("account")}
-                    Bar{text: "Agent" on_click: || show_tab("agent")}
+                    tab_accounts := Bar{text: "账号" on_click: || show_tab("account")}
+                    tab_system := Bar{text: "系统" on_click: || show_tab("agent")}
                 }
                 account_tab := View{width: Fill height: Fill flow: Down spacing: 8
                     settings_accounts := ScrollYView{width: Fill height: Fill flow: Down spacing: 0 on_render: || {
                         if accounts.len() == 0 {
-                            Label{text: "No accounts yet." draw_text.color: secondary draw_text.text_style.font_size: 13}
+                            Label{text: say("no_accounts") draw_text.color: secondary draw_text.text_style.font_size: 13}
                         }
                         for a in accounts {
                             View{width: Fill height: Fit flow: Down spacing: 0
                                 View{width: Fill height: Fit flow: Right align: Align{y: 0.0} padding: Inset{top: 8 bottom: 2} spacing: 8
                                     View{width: Fill height: Fit flow: Down spacing: 2
                                         if renaming == a.id {
-                                            TextInput{width: Fill height: 34 text: rename_text empty_text: "Name" on_change: |text| rename_text = text on_return: |text| finish_rename(a.id, text)
+                                            TextInput{width: Fill height: 34 text: rename_text empty_text: say("name") on_change: |text| rename_text = text on_return: |text| finish_rename(a.id, text)
                                                 draw_bg +: {color: #xf2f2f7 border_radius: 6.0}
                                                 draw_text +: {color: ink text_style +: {font_size: 15}}}
                                         } else {
@@ -1761,7 +2415,7 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
                                             Label{width: Fill text: a.address max_lines: 1 draw_text.color: secondary draw_text.text_style.font_size: 12}
                                         }
                                     }
-                                    ButtonFlat{text: "Remove" height: 32 padding: Inset{left: 12 right: 12} on_click: || ask_remove(a)
+                                    ButtonFlat{text: say("remove") height: 32 padding: Inset{left: 12 right: 12} on_click: || ask_remove(a)
                                         draw_bg +: {color: #x00000000 color_hover: #x0000000a color_down: #x00000014 border_size: 0.0}
                                         draw_text +: {color: #xff3b30 color_hover: #xff3b30 color_down: #xff3b30 text_style +: {font_size: 14}}}
                                 }
@@ -1771,13 +2425,36 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
                         GestureView{width: Fill height: Fill on_tap: |x, y| commit_rename()}
                     }}
                 }
-                agent_tab := View{visible: false width: Fill height: Fill flow: Down spacing: 10
-                    Label{text: "API" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 16}}
-                    Label{width: Fill text: "AgentMail does not take an API key. Add your provider in OctoSense: Start → Settings → AI providers. The key stays on this device."
+                agent_tab := ScrollYView{visible: false width: Fill height: Fill flow: Down spacing: 10 padding: Inset{bottom: 24}
+                    api_title := Label{text: "API" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 16}}
+                    api_body := Label{width: Fill text: "AgentMail 不接收 API 密钥。请在 OctoSense 中添加：开始 → 设置 → AI providers。密钥只留在这台设备上。"
                         draw_text.color: secondary draw_text.text_style.font_size: 13}
                     api_status := Label{width: Fill text: "" draw_text.color: ink draw_text.text_style.font_size: 13}
-                    Bar{text: "Test connection" on_click: || refresh_provider()}
-                    Label{text: "Translation language" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 16}}
+                    btn_test := Bar{text: "测试连接" on_click: || refresh_provider()}
+                    sys_title := Label{text: "系统语言" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 16}}
+                    View{width: Fill height: 40 flow: Overlay
+                        SolidView{width: Fill height: Fill draw_bg +: {color: #xf2f2f7 border_radius: 10.0}}
+                        GestureView{width: Fill height: Fill flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| toggle_sys_menu()
+                            sys_name := Label{width: Fill text: "中文" draw_text.color: ink draw_text.text_style.font_size: 15}
+                            sys_mark := Label{text: "▾" draw_text.color: secondary draw_text.text_style.font_size: 14}
+                        }
+                    }
+                    sys_menu := SolidView{visible: false width: Fill height: 180 flow: Down draw_bg.color: #xf2f2f7
+                        ScrollYView{width: Fill height: Fill flow: Down
+                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_sys(0)
+                                Label{width: Fill text: "English" draw_text.color: ink draw_text.text_style.font_size: 15}}
+                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_sys(1)
+                                Label{width: Fill text: "中文" draw_text.color: ink draw_text.text_style.font_size: 15}}
+                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_sys(2)
+                                Label{width: Fill text: "Français" draw_text.color: ink draw_text.text_style.font_size: 15}}
+                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_sys(3)
+                                Label{width: Fill text: "日本語" draw_text.color: ink draw_text.text_style.font_size: 15}}
+                            GestureView{width: Fill height: 36 flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| pick_sys(4)
+                                Label{width: Fill text: "Русский" draw_text.color: ink draw_text.text_style.font_size: 15}}
+                        }
+                    }
+                    sys_hint := Label{width: Fill text: "界面使用这个语言。" draw_text.color: secondary draw_text.text_style.font_size: 12}
+                    trans_title := Label{text: "翻译语言" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 16}}
                     View{width: Fill height: 40 flow: Overlay
                         SolidView{width: Fill height: Fill draw_bg +: {color: #xf2f2f7 border_radius: 10.0}}
                         GestureView{width: Fill height: Fill flow: Right align: Align{y: 0.5} padding: Inset{left: 12 right: 12} on_tap: |x, y| toggle_lang_menu()
@@ -1802,24 +2479,41 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
                         }
                     }
                     lang_custom := View{visible: false width: Fill height: Fit
-                        custom_field := TextInput{width: Fill height: 40 empty_text: "Language name" on_change: |text| save_custom(text)
+                        custom_field := TextInput{width: Fill height: 40 empty_text: "语言名称" on_change: |text| save_custom(text)
                             draw_bg +: {color: #xf2f2f7 color_hover: #xf2f2f7 color_focus: #xf2f2f7 color_empty: #xf2f2f7
                                 border_color: #x00000000 border_radius: 10.0}
                             draw_text +: {color: ink color_hover: ink color_focus: ink color_empty: secondary}}
                     }
-                    Label{width: Fill text: "Recognize and Translate use this language. If the mail is already in it, the text stays as it is." draw_text.color: secondary draw_text.text_style.font_size: 12}
+                    trans_hint := Label{width: Fill text: "识别和翻译使用这个语言。如果邮件已经是这个语言，就保持原文。" draw_text.color: secondary draw_text.text_style.font_size: 12}
+                }
+            }
+            draft_ask := GestureView{visible: false width: Fill height: Fill align: Align{x: 0.5 y: 0.5} on_tap: |x, y| { }
+                draw_bg.color: #x66000000
+                GestureView{width: 340 height: Fit on_tap: |x, y| { }
+                    SolidView{width: Fill height: Fit flow: Down padding: 20 spacing: 12 draw_bg.color: #xffffff
+                        draft_title := Label{text: "" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 18}}
+                        draft_body := Label{width: Fill text: "" draw_text.color: secondary draw_text.text_style.font_size: 14}
+                        View{width: Fill height: Fit flow: Right
+                            GestureView{width: Fill height: 36 align: Align{x: 0.5 y: 0.5} on_tap: |x, y| draft_no()
+                                draft_no_label := Label{text: "不保存" draw_text.color: accent draw_text.text_style.font_size: 15}
+                            }
+                            GestureView{width: Fill height: 36 align: Align{x: 0.5 y: 0.5} on_tap: |x, y| draft_yes()
+                                draft_yes_label := Label{text: "存入草稿" draw_text.color: accent draw_text.text_style: theme.font_bold{font_size: 15}}
+                            }
+                        }
+                    }
                 }
             }
             confirm := GestureView{visible: false width: Fill height: Fill align: Align{x: 0.5 y: 0.5} on_tap: |x, y| cancel_remove()
                 draw_bg.color: #x66000000
                 GestureView{width: 320 height: Fit on_tap: |x, y| { }
                     SolidView{width: Fill height: Fit flow: Down padding: 20 spacing: 12 draw_bg.color: #xffffff
-                        Label{text: "Remove this account?" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 18}}
+                        confirm_title := Label{text: "移除这个账号？" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 18}}
                         confirm_name := Label{width: Fill text: "" draw_text.color: secondary draw_text.text_style.font_size: 14}
                         View{width: Fill height: Fit flow: Right
-                            Bar{text: "Cancel" on_click: || cancel_remove()}
+                            btn_remove_cancel := Bar{text: "取消" on_click: || cancel_remove()}
                             View{width: Fill height: 1}
-                            ButtonFlat{text: "Remove" height: 36 padding: Inset{left: 12 right: 12} on_click: || confirm_remove()
+                            ButtonFlat{text: say("remove") height: 36 padding: Inset{left: 12 right: 12} on_click: || confirm_remove()
                                 draw_bg +: {color: #x00000000 color_hover: #x0000000a color_down: #x00000014 border_size: 0.0}
                                 draw_text +: {color: #xff3b30 color_hover: #xff3b30 color_down: #xff3b30 text_style +: {font_size: 15}}}
                         }
@@ -1845,7 +2539,7 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
             }
             View{width: Fill height: Fill flow: Down padding: Inset{right: 12 top: 8 bottom: 10} spacing: 8
                 View{width: Fill height: Fit flow: Right align: Align{y: 0.5}
-                    Label{text: "Agent" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 20}}
+                    agent_title := Label{text: "助手" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 20}}
                     View{width: Fill height: 1}
                     ButtonFlat{text: "🕐" width: 36 height: 36 padding: Inset{left: 0 right: 0 top: 0 bottom: 0} on_click: || toggle_history()
                         draw_bg +: {color: #x00000000 color_hover: #x00000014 color_down: #x00000022 border_size: 0.0 border_radius: 18.0}
@@ -1855,7 +2549,7 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
                     agent_chat := View{width: Fill height: Fill flow: Down spacing: 8
                 chat_view := ScrollYView{width: Fill height: Fill flow: Down spacing: 10 on_render: || {
                     if chat_log.len() == 0 {
-                        Label{width: Fill text: "Ask about the open message. Say all mail or a time period to use those instead." draw_text.color: secondary draw_text.text_style.font_size: 13}
+                        Label{width: Fill text: say("ask_hint") draw_text.color: secondary draw_text.text_style.font_size: 13}
                     }
                     for m in chat_log {
                         if m.role == "user" {
@@ -1867,19 +2561,19 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
                 }}
                 agent_note := Label{width: Fill text: "" draw_text.color: secondary draw_text.text_style.font_size: 12}
                 View{width: Fill height: Fit flow: Right align: Align{y: 0.5} spacing: 4
-                    agent_input := TextInput{width: Fill height: 40 empty_text: "Ask" on_change: |text| pending_input = text on_return: |text| ask_agent(text)
+                    agent_input := TextInput{width: Fill height: 40 empty_text: "提问" on_change: |text| pending_input = text on_return: |text| ask_agent(text)
                         draw_bg +: {color: #xffffff color_hover: #xffffff color_focus: #ffffff color_empty: #xffffff
                             border_color: #xe5e5ea border_color_hover: #xe5e5ea border_color_focus: accent border_color_empty: #xe5e5ea border_radius: 10.0}
                         draw_text +: {color: ink color_hover: ink color_focus: ink color_empty: secondary color_empty_hover: secondary}
                     }
-                    Bar{text: "Send" height: 40 padding: Inset{left: 6 right: 0} on_click: || ask_agent("")}
+                    btn_ask_send := Bar{text: "发送" height: 40 padding: Inset{left: 6 right: 0} on_click: || ask_agent("")}
                 }
                     }
                     history_pane := SolidView{visible: false width: Fill height: Fill flow: Down spacing: 8 draw_bg.color: #xfafafa
-                        Bar{text: "New chat" on_click: || new_chat()}
+                        btn_new_chat := Bar{text: "新对话" on_click: || new_chat()}
                         history_list := ScrollYView{width: Fill height: Fill flow: Down spacing: 4 on_render: || {
                             if sessions.len() == 0 {
-                                Label{width: Fill text: "No earlier chats yet." draw_text.color: secondary draw_text.text_style.font_size: 13}
+                                Label{width: Fill text: say("no_chats") draw_text.color: secondary draw_text.text_style.font_size: 13}
                             }
                             for i in sessions.len() {
                                 let s = sessions[i]
@@ -1899,15 +2593,15 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
         draw_bg.color: #x66000000
         GestureView{width: 360 height: Fit on_tap: |x, y| { }
             SolidView{width: Fill height: Fit flow: Down padding: 20 spacing: 12 draw_bg +: {color: #xffffffff border_radius: 14.0}
-                Label{text: "What should this say?" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 18}}
-                draft_idea := TextInput{width: Fill height: 96 empty_text: "Let AI decide" on_return: |text| send_draft_idea()
+                draft_prompt := Label{text: "这封信要写什么？" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 18}}
+                draft_idea := TextInput{width: Fill height: 96 empty_text: "让 AI 决定" on_return: |text| send_draft_idea()
                     draw_bg +: {color: #xf2f2f7 color_hover: #xf2f2f7 color_focus: #xf2f2f7 color_empty: #xf2f2f7
                         border_color: #x00000000 border_radius: 10.0}
                     draw_text +: {color: ink color_hover: ink color_focus: ink color_empty: secondary}}
                 View{width: Fill height: Fit flow: Right
-                    Bar{text: "Cancel" on_click: || close_draft_sheet()}
+                    btn_draft_cancel := Bar{text: "取消" on_click: || close_draft_sheet()}
                     View{width: Fill height: 1}
-                    Bar{text: "Send" on_click: || send_draft_idea()}
+                    btn_draft_send := Bar{text: "发送" on_click: || send_draft_idea()}
                 }
             }
         }
