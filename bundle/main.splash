@@ -31,9 +31,6 @@ let chat_log = []
 let pending_q = ""
 let pending_input = ""
 let pending_event = nil
-let saved_events = []
-let calendar_handle = ""
-let calendar_retried = false
 let turn_can_add = false
 let follow_gen = 0
 let follow_locked = false
@@ -382,7 +379,7 @@ fn say(id){
     if id == "added_cal" { return at5(i, "Added to the schedule.", "已加入日程。", "Ajouté à l'agenda.", "予定に追加しました。", "Добавлено в расписание.") }
     if id == "already_cal" { return at5(i, "This schedule is already saved.", "日程里已经有这一条。", "Cet horaire est déjà enregistré.", "この予定はすでにあります。", "Это расписание уже сохранено.") }
     if id == "os_saved" { return at5(i, "Saved on the system calendar.", "已写入系统日历。", "Enregistré dans le calendrier du système.", "システムのカレンダーに書き込みました。", "Записано в системный календарь.") }
-    if id == "bad_time" { return at5(i, "The time could not be placed on the system calendar, so it was kept in the app.", "时间无法写入系统日历，已先记在应用里。", "L'heure ne peut pas aller au calendrier système ; elle reste dans l'application.", "時刻をシステムカレンダーに書けないので、アプリ内に残しました。", "Время нельзя записать в системный календарь, оно сохранено в приложении.") }
+    if id == "bad_time" { return at5(i, "Calendar could not understand that time. Nothing was added.", "日历无法识别这个时间，没有写入任何日程。", "Le calendrier ne comprend pas cette heure. Aucun événement n'a été ajouté.", "カレンダーが時刻を解釈できないため、予定は追加されませんでした。", "Календарь не распознал время. Событие не добавлено.") }
     if id == "no_calendar" { return at5(i, "No writable calendar was found.", "没有找到可写入的日历。", "Aucun calendrier modifiable.", "書き込めるカレンダーがありません。", "Нет календаря, доступного для записи.") }
     if id == "cal_denied" { return at5(i, "Calendar access was not granted.", "没有获得日历权限。", "L'accès au calendrier n'a pas été accordé.", "カレンダーの許可がありません。", "Доступ к календарю не дан.") }
     if id == "cal_unsupported" { return at5(i, "This system has no device calendar.", "这个系统没有设备日历。", "Ce système n'a pas de calendrier d'appareil.", "このシステムにはデバイスカレンダーがありません。", "На этой системе нет календаря устройства.") }
@@ -392,6 +389,8 @@ fn say(id){
     if id == "cal_foreground" { return at5(i, "Open AgentMail, then approve the calendar review.", "请先打开 AgentMail，再同意日历审阅。", "Ouvrez AgentMail, puis approuvez la revue du calendrier.", "AgentMail を開いてから、カレンダーの確認に同意してください。", "Откройте AgentMail и подтвердите проверку календаря.") }
     if id == "readback" { return at5(i, "Read back: ", "读回确认：", "Relecture : ", "読み戻し：", "Прочитано: ") }
     if id == "readback_fail" { return at5(i, "Read-back failed. The schedule was not found.", "读回失败：写入后没有在日程记录里找到这一条。", "Relecture échouée : l'horaire n'a pas été retrouvé.", "読み戻し失敗：予定記録に見つかりません。", "Проверка не удалась: запись не найдена.") }
+    if id == "calendar_add_failed" { return at5(i, "Calendar did not return a result for this write.", "日历写入没有返回结果，请重试。", "Le calendrier n'a renvoyé aucun résultat pour cet ajout.", "カレンダーへの書き込み結果が返されませんでした。", "Календарь не вернул результат записи.") }
+    if id == "calendar_readback_failed" { return at5(i, "Calendar did not return a result for the read-back.", "日历读回没有返回结果；请在日历中核对这一条。", "Le calendrier n'a renvoyé aucun résultat de relecture.", "カレンダーの読み戻し結果が返されませんでした。", "Календарь не вернул результат проверки.") }
     if id == "class_ok" { return at5(i, "Read back: ", "读回确认：", "Relecture : ", "読み戻し：", "Прочитано: ") }
     if id == "class_match" { return at5(i, " classifications match the record", " 条分类与记录一致", " classements correspondent", " 件の分類が記録と一致", " классификаций совпали") }
     if id == "class_miss" { return at5(i, " did not match", " 条没有对上", " ne correspondent pas", " 件が一致しません", " не совпали") }
@@ -431,13 +430,13 @@ fn local_error(raw){
     if t.search("host_not_configured") >= 0 { return say("cal_unconfigured") }
     if t.search("foreground_required") >= 0 { return say("cal_foreground") }
     if t.search("invalid_handle") >= 0 || t.search("calendar_changed") >= 0 { return say("no_calendar") }
-    if t.search("Invalid start_ms") >= 0 || t.search("Invalid end_ms") >= 0 || t.search("Time window") >= 0 || t.search("timezone") >= 0 { return say("bad_time") }
+    if t.search("Invalid start_ms") >= 0 || t.search("Invalid end_ms") >= 0 || t.search("Time window") >= 0 || t.search("timezone") >= 0 || t.search("is not a time") >= 0 || t.search("event ends before") >= 0 { return say("bad_time") }
     if t.search("tokens for today") >= 0 || t.search("model calls for today") >= 0 { return say("budget") }
     if t.search("model calls a minute") >= 0 { return say("rate") }
     if t.search("No AI provider is set up") >= 0 || t.search("could not be read") >= 0 { return say("no_provider") }
     if t.search("No AI provider answered") >= 0 { return say("provider_down") }
     if t.search("answer was refused") >= 0 { return say("bad_answer") }
-    return say("unknown")
+    return say("unknown") + "\n" + t
 }
 fn add_account(){
     status(say("signin_sheet"))
@@ -1495,154 +1494,112 @@ fn save_tools(){
     }
     fs.write("tools.txt", text)
 }
-fn load_events(){
-    saved_events = []
-    if !fs.exists("events.txt") { return }
-    let lines = fs.read("events.txt").split("\n")
-    for line in lines {
-        if line == "" { continue }
-        let bits = line.split("|")
-        if bits.len() >= 4 {
-            let key = ""
-            if bits.len() >= 5 { key = unpack(bits[4]) }
-            saved_events.push({title: unpack(bits[0]) start: unpack(bits[1]) end: unpack(bits[2]) location: unpack(bits[3]) key: key})
-        }
-    }
-}
-fn save_events(){
-    let text = ""
-    for e in saved_events {
-        if text != "" { text = text + "\n" }
-        text = text + pack(e.title) + "|" + pack(e.start) + "|" + pack(e.end) + "|" + pack(e.location) + "|" + pack(e.key)
-    }
-    fs.write("events.txt", text)
-}
 fn event_brief(){
     if pending_event == nil { return "" }
     let place = pending_event.location
     if place == nil { place = "" }
     return pending_event.title + " | " + pending_event.start + " – " + pending_event.end + " | " + place
 }
-fn event_saved(title, start){
-    for e in saved_events {
-        if e.title == title && e.start == start { return true }
-    }
-    return false
-}
-fn event_readback(title, start){
-    load_events()
-    for e in saved_events {
-        if e.title == title && e.start == start {
-            let place = e.location
-            if place == nil { place = "" }
-            let line = say("readback") + e.title + " | " + e.start + " – " + e.end
-            if place != "" { line = line + " | " + place }
-            return line
-        }
-    }
-    return say("readback_fail")
-}
-fn commit_event(){
-    if pending_event == nil { return say("no_pending") }
-    let title = pending_event.title
-    let start = pending_event.start
-    let end = pending_event.end
-    let location = pending_event.location
+fn calendar_request_id(){
+    if pending_event == nil { return "" }
     let key = pending_event.key
-    if key == nil { key = "" }
-    if location == nil { location = "" }
-    let shown = title + "\n" + start + " – " + end
-    if location != "" { shown = shown + "\n" + location }
-    if event_saved(title, start) {
-        pending_event = nil
-        return say("already_cal") + "\n" + shown + "\n" + event_readback(title, start)
+    if key == nil || key == "" { key = pending_event.title + "|" + pending_event.start }
+    return "agent-mail/" + key
+}
+fn calendar_time(text){
+    if text == nil { return "" }
+    let value = ("" + text).trim()
+    let words = value.split(" ")
+    // Models sometimes append a display-zone abbreviation (for example HKT).
+    // Calendar stores the zone separately, so keep only the local wall time.
+    if words.len() >= 2 && words[0].split("-").len() == 3 && words[1].split(":").len() >= 2 {
+        return words[0] + "T" + words[1]
     }
-    saved_events.push({title: title start: start end: end location: location key: key})
-    save_events()
+    return value
+}
+fn calendar_optional(value, key, fallback){
+    if value == nil { return fallback }
+    let found = try { value[key] } catch { nil }
+    if found == nil { return fallback }
+    return found
+}
+fn calendar_event_line(event){
+    let end = event.end
+    let place = event.location
+    if end == nil { end = "" }
+    if place == nil { place = "" }
+    let line = say("readback") + event.title + " | " + event.start
+    if end != "" { line = line + " – " + end }
+    if place != "" { line = line + " | " + place }
+    return line
+}
+fn finish_calendar_event(event, shown, reused){
     pending_event = nil
-    return say("added_cal") + "\n" + shown + "\n" + event_readback(title, start)
+    let message = say("added_cal")
+    if reused == true { message = say("already_cal") }
+    finish_tool(message + "\n" + shown + "\n" + calendar_event_line(event))
 }
-fn load_calendar(){
-    calendar_handle = ""
-    if fs.exists("calendar.txt") { calendar_handle = fs.read("calendar.txt").trim() }
+fn read_back_calendar_event(id, shown, reused){
+    host.request("calendar.events", {limit: 200}, fn(r){
+        // Host refusals may call back inside host.request. Finish UI work on
+        // the next turn, where repainting and persistence are reliable.
+        let answer = {is_ok: calendar_optional(r, "is_ok", false) data: calendar_optional(r, "data", nil) error: calendar_optional(r, "error", "")}
+        start_timeout(0.01, || {
+            if !answer.is_ok {
+                if answer.error == "" { finish_tool(say("calendar_readback_failed")) }
+                else { finish_tool(local_error(answer.error)) }
+                return
+            }
+            let events = calendar_optional(answer.data, "events", [])
+            for event in events {
+                if event.id == id {
+                    finish_calendar_event(event, shown, reused)
+                    return
+                }
+            }
+            finish_tool(say("readback_fail"))
+        })
+    })
 }
-fn save_calendar(handle){
-    calendar_handle = handle
-    fs.write("calendar.txt", handle)
-}
-fn begin_device_event(){
-    if pending_event == nil { finish_tool(say("no_pending")); return }
-    let title = pending_event.title
-    let start = pending_event.start
-    if event_saved(title, start) { finish_tool(commit_event()); return }
-    if !(pending_event.start_ms > 1000000000000) || !(pending_event.end_ms > pending_event.start_ms) {
-        finish_tool(commit_event() + "\n" + say("bad_time"))
+fn calendar_add_result(answer, shown){
+    let data = answer.data
+    let reused = calendar_optional(data, "reused", false)
+    let verified = calendar_optional(data, "verified", false)
+    let event = calendar_optional(data, "event", nil)
+    if answer.is_ok && verified == true && event != nil {
+        finish_calendar_event(event, shown, reused)
         return
     }
-    calendar_retried = false
+    if !answer.is_ok {
+        if answer.error == "" { finish_tool(say("calendar_add_failed")) }
+        else { finish_tool(local_error(answer.error)) }
+        return
+    }
+    let id = calendar_optional(data, "id", "")
+    if id == "" { finish_tool(say("readback_fail")); return }
+    // Compatibility with an older Calendar host that returns only an id.
+    read_back_calendar_event(id, shown, reused)
+}
+fn begin_calendar_event(){
+    if pending_event == nil { finish_tool(say("no_pending")); return }
+    let title = pending_event.title
+    let start = calendar_time(pending_event.start)
+    let end = calendar_time(pending_event.end)
+    let timezone = pending_event.timezone
+    let location = pending_event.location
+    if end == nil { end = "" }
+    if timezone == nil || timezone == "" { timezone = "Asia/Shanghai" }
+    if location == nil { location = "" }
+    let shown = title + "\n" + start
+    if end != "" { shown = shown + " – " + end }
+    if location != "" { shown = shown + "\n" + location }
     agent_busy = true
     ui.agent_note.set_text(say("thinking"))
-    ensure_calendar()
-}
-fn ensure_calendar(){
-    host.request("device_calendar.permission.status", {}, fn(r){
-        if !r.is_ok { finish_tool(local_error(r.error)); return }
-        let granted = false
-        if r.data != nil && r.data.app_consent == true && ("" + r.data.os_permission) == "granted" { granted = true }
-        if granted { pick_calendar(); return }
-        host.request("device_calendar.permission.request", {}, fn(p){
-            if !p.is_ok { finish_tool(local_error(p.error)); return }
-            pick_calendar()
-        })
-    })
-}
-fn pick_calendar(){
-    if calendar_handle != "" { create_os_event(); return }
-    host.request("device_calendar.calendars.list", {}, fn(r){
-        if !r.is_ok { finish_tool(local_error(r.error)); return }
-        let id = ""
-        if r.data != nil && r.data.calendars != nil {
-            for c in r.data.calendars {
-                if id == "" && c.writable == true { id = c.id }
-            }
-        }
-        if id == "" { finish_tool(say("no_calendar")); return }
-        host.request("device_calendar.calendars.select", {calendar_id: id}, fn(s){
-            if !s.is_ok { finish_tool(local_error(s.error)); return }
-            if s.data == nil || s.data.handle == nil || s.data.handle == "" {
-                finish_tool(say("no_calendar"))
-                return
-            }
-            save_calendar(s.data.handle)
-            create_os_event()
-        })
-    })
-}
-fn create_os_event(){
-    if pending_event == nil { finish_tool(say("no_pending")); return }
-    let tz = pending_event.timezone
-    if tz == nil || tz == "" { tz = "Asia/Shanghai" }
-    let place = pending_event.location
-    if place == nil { place = "" }
-    let ev = {title: pending_event.title start_ms: pending_event.start_ms end_ms: pending_event.end_ms timezone: tz location: place notes: ""}
-    host.request("device_calendar.events.create", {handle: calendar_handle event: ev}, fn(r){
-        if !r.is_ok {
-            let err = ""
-            if r.error != nil { err = "" + r.error }
-            if !calendar_retried && err.search("invalid_handle") >= 0 {
-                calendar_retried = true
-                save_calendar("")
-                pick_calendar()
-                return
-            }
-            finish_tool(local_error(r.error))
-            return
-        }
-        if r.data == nil || r.data.saved != true {
-            finish_tool(say("cal_cancelled"))
-            return
-        }
-        finish_tool(commit_event() + "\n" + say("os_saved"))
+    host.request("calendar.add_event", {title: title start: start end: end timezone: timezone location: location notes: "" request_id: calendar_request_id()}, fn(r){
+        // Current Calendar returns the persisted event after a storage
+        // read-back. Copy the envelope and settle it on the next UI turn.
+        let answer = {is_ok: calendar_optional(r, "is_ok", false) data: calendar_optional(r, "data", nil) error: calendar_optional(r, "error", "")}
+        start_timeout(0.01, || calendar_add_result(answer, shown))
     })
 }
 fn agrees(text){
@@ -2100,7 +2057,7 @@ fn tool_find_event(){
     ui.agent_note.set_text(say("thinking"))
     let key = mail_key()
     host.request("model.complete", {
-        task: "Decide whether this email contains one calendar event, such as a meeting, appointment, delivery window, flight, reservation, or a deadline that has a date or a time. If it does, set found to yes and copy the title, start, end, and location from the mail. Also set start_ms and end_ms to Unix milliseconds for those times, and timezone to an IANA name such as Asia/Shanghai. If the end is missing, set end_ms to one hour after start_ms. If there is no schedule, set found to no, start_ms and end_ms to 0, and leave the other fields empty. Do not invent a time or a place."
+        task: "Decide whether this email contains one calendar event, such as a meeting, appointment, delivery window, flight, reservation, or a deadline that has a date or a time. If it does, set found to yes and copy the title and location from the mail. Write start and end strictly as YYYY-MM-DDTHH:mm local wall times, with no timezone name or abbreviation in those fields. Put the IANA timezone, such as Asia/Hong_Kong or Asia/Shanghai, only in timezone. Also set start_ms and end_ms to Unix milliseconds for those times. If the end is missing, set end_ms to one hour after start_ms and write that derived local time in end. If there is no schedule, set found to no, start_ms and end_ms to 0, and leave the other fields empty. Do not invent a start time or a place."
         input: {subject: reading.subject from: reading.sender body: clip(strip_tags(reading.body), 6000)}
         schema: event_schema()
         class: "fast"
@@ -2143,7 +2100,7 @@ fn tool_add_event(){
         finish_tool("No schedule is waiting. Use the chat history and call find_event on the open mail before adding.")
         return
     }
-    begin_device_event()
+    begin_calendar_event()
 }
 fn tool_translate(){
     if reading == nil { finish_tool("No message is open, so it was not translated."); return }
@@ -2438,7 +2395,7 @@ fn ask_agent(text){
     paint_chat()
     show_agent()
     if pending_event != nil && agrees(q) {
-        begin_device_event()
+        begin_calendar_event()
         return
     }
     if pending_event != nil && declines(q) {
@@ -2450,7 +2407,7 @@ fn ask_agent(text){
     react_next()
 }
 
-start_timeout(0.05, || { load_local_drafts(); load_accounts(); load_prefs(); load_calendar() })
+start_timeout(0.05, || { load_local_drafts(); load_accounts(); load_prefs() })
 
 let ink = #x1c1c1e
 let secondary = #x8e8e93
