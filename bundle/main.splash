@@ -5,7 +5,14 @@ let total = 0
 let open_id = ""
 let reading = nil
 let busy = false
-let folder = {id: "INBOX" name: "Inbox"}
+let sync_again = false
+let sync_queue = []
+let list_acc = []
+let list_token = 0
+let list_shown = 25
+let list_total = 0
+let list_loaded = 0
+let folder = {id: "INBOX" name: "Inbox" role: "inbox"}
 let recent = []
 let classes = {}
 let classify_goal = 100
@@ -190,8 +197,25 @@ fn is_open(id){
     if open_by[id] == nil { return true }
     return open_by[id]
 }
+fn folder_face(name, role){
+    let n = ""
+    if name != nil { n = ("" + name).trim() }
+    let r = ""
+    if role != nil { r = ("" + role).trim() }
+    if r == "inbox" || n == "Inbox" || n == "INBOX" { return say("box_inbox") }
+    if r == "flagged" || n == "Starred" || n == "Starred Mail" { return say("box_starred") }
+    if r == "drafts" || n == "Drafts" || n == "Draft" { return say("box_drafts") }
+    if r == "sent" || n == "Sent" || n == "Sent Mail" || n == "Sent Items" { return say("box_sent") }
+    if r == "all" || n == "All Mail" || n == "All" { return say("box_all") }
+    if r == "junk" || n == "Spam" || n == "Junk" || n == "Junk Mail" || n == "Junk E-mail" { return say("box_spam") }
+    if r == "trash" || n == "Bin" || n == "Trash" || n == "Deleted" || n == "Deleted Items" || n == "Deleted Messages" { return say("box_bin") }
+    if r == "important" || n == "Important" { return say("box_important") }
+    if r == "archive" || n == "Archive" { return say("box_archive") }
+    if n == "Notes" { return say("box_notes") }
+    return n
+}
 fn show_heading(){
-    ui.title.set_text(folder.name)
+    ui.title.set_text(folder_face(folder.name, folder.role))
     if account == nil { ui.address.set_text("") }
     else { ui.address.set_text(account.address) }
 }
@@ -205,7 +229,7 @@ fn load_accounts(){
             }
             if !keep {
                 account = accounts[0]
-                folder = {id: "INBOX" name: "Inbox"}
+                folder = {id: "INBOX" name: "Inbox" role: "inbox"}
             }
             pane("inbox")
             show_heading()
@@ -215,7 +239,6 @@ fn load_accounts(){
                 load_folders(a.id)
             }
             list()
-            sync()
             if ui.settings_pane.visible() { ui.settings_accounts.render() }
         } else {
             accounts = []
@@ -299,6 +322,17 @@ fn say(id){
     if id == "let_ai" { return at5(i, "Let AI decide", "让 AI 决定", "Laisser l'IA décider", "AI に任せる", "Пусть решит ИИ") }
     if id == "lang_name" { return at5(i, "Language name", "语言名称", "Nom de la langue", "言語名", "Название языка") }
     if id == "name" { return at5(i, "Name", "名称", "Nom", "名前", "Имя") }
+    if id == "box_inbox" { return at5(i, "Inbox", "收件箱", "Boîte de réception", "受信トレイ", "Входящие") }
+    if id == "box_starred" { return at5(i, "Starred", "星标邮件", "Suivis", "スター付き", "Помеченные") }
+    if id == "box_drafts" { return at5(i, "Drafts", "草稿箱", "Brouillons", "下書き", "Черновики") }
+    if id == "box_sent" { return at5(i, "Sent", "已发送", "Envoyés", "送信済み", "Отправленные") }
+    if id == "box_all" { return at5(i, "All Mail", "所有邮件", "Tous les messages", "すべてのメール", "Вся почта") }
+    if id == "box_spam" { return at5(i, "Spam", "垃圾邮件", "Indésirables", "迷惑メール", "Спам") }
+    if id == "box_bin" { return at5(i, "Bin", "废纸篓", "Corbeille", "ゴミ箱", "Корзина") }
+    if id == "box_important" { return at5(i, "Important", "重要", "Important", "重要", "Важные") }
+    if id == "box_archive" { return at5(i, "Archive", "归档", "Archives", "アーカイブ", "Архив") }
+    if id == "box_notes" { return at5(i, "Notes", "笔记", "Notes", "メモ", "Заметки") }
+    if id == "show_more" { return at5(i, "Show more", "查看更多", "Voir plus", "もっと見る", "Показать ещё") }
     if id == "checking" { return at5(i, "Checking for mail…", "正在检查邮件…", "Vérification du courrier…", "メールを確認しています…", "Проверка почты…") }
     if id == "one_new" { return at5(i, "1 new message", "1 封新邮件", "1 nouveau message", "新着 1 件", "1 новое письмо") }
     if id == "up_to_date" { return at5(i, "Up to date", "已是最新", "À jour", "最新です", "Всё актуально") }
@@ -400,8 +434,31 @@ fn load_folders(id){
         if r.is_ok {
             folders_by[id] = r.data
             ui.rail_slot.render()
+            queue_account(id)
         }
     })
+}
+fn queued(aid, fid){
+    for item in sync_queue {
+        if item.account == aid && item.folder == fid { return true }
+    }
+    return false
+}
+fn enqueue_sync(aid, fid){
+    if aid == "" || fid == "" { return }
+    if queued(aid, fid) { return }
+    sync_queue.push({account: aid folder: fid})
+}
+fn queue_account(id){
+    enqueue_sync(id, "INBOX")
+    let found = folders_by[id]
+    if found != nil {
+        for f in found {
+            let fid = "" + f.id
+            if fid != "INBOX" { enqueue_sync(id, fid) }
+        }
+    }
+    pump_sync()
 }
 fn select_named_now(aid, fid, fname){
     for a in accounts {
@@ -415,13 +472,15 @@ fn select_named_now(aid, fid, fname){
         }
     }
     folder = {id: fid name: fname role: role}
+    list_shown = 25
+    list_total = 0
+    list_loaded = 0
     messages = []
     close_detail()
     show_heading()
     ui.rail_slot.render()
     paint_rows()
     list()
-    sync()
 }
 fn select_named(aid, fid, fname){
     if ui.composer.visible() {
@@ -433,19 +492,52 @@ fn select_named(aid, fid, fname){
 fn select_folder(a, f){
     select_named(a.id, f.id, f.name)
 }
-fn sync(){
-    if account == nil || busy { return }
+fn pump_sync(){
+    if busy { return }
+    if sync_queue.len() == 0 { return }
+    let job = sync_queue[0]
+    let rest = []
+    let i = 0
+    for item in sync_queue {
+        if i > 0 { rest.push(item) }
+        i = i + 1
+    }
+    sync_queue = rest
     busy = true
-    status(say("checking"))
-    host.request("mail.sync", {account: account.id folder: folder.id}, fn(r){
+    let sync_account = job.account
+    let syncing = job.folder
+    if account != nil && account.id == sync_account && ("" + folder.id) == syncing { status(say("checking")) }
+    host.request("mail.sync", {account: sync_account folder: syncing}, fn(r){
         busy = false
+        let still = account != nil && account.id == sync_account && ("" + folder.id) == syncing
         if r.is_ok {
-            if r.data.new == 1 { status(say("one_new")) }
-            else if r.data.new > 0 { status("" + r.data.new + say("many_new")) }
-            else { status(say("up_to_date")) }
-            list()
-        } else { status(local_error(r.error)) }
+            if still {
+                if r.data.new == 1 { status(say("one_new")) }
+                else if r.data.new > 0 { status("" + r.data.new + say("many_new")) }
+                else { status(say("up_to_date")) }
+                list()
+            }
+        } else if still { status(local_error(r.error)) }
+        if sync_again && account != nil {
+            sync_again = false
+            let again = "" + folder.id
+            let rest2 = [{account: account.id folder: again}]
+            for item in sync_queue { rest2.push(item) }
+            sync_queue = rest2
+        }
+        pump_sync()
     })
+}
+fn sync(){
+    if account == nil { return }
+    if busy { sync_again = true; return }
+    let fid = "" + folder.id
+    let rest = [{account: account.id folder: fid}]
+    for item in sync_queue {
+        if item.account != account.id || item.folder != fid { rest.push(item) }
+    }
+    sync_queue = rest
+    pump_sync()
 }
 fn load_classes(){
     classes = {}
@@ -496,7 +588,9 @@ fn paint_rows(){
         ui.rows.set_visible(true)
         ui.rows.render()
     }
-    status(folder.name + " · " + messages.len())
+    let count = list_total
+    if count < messages.len() { count = messages.len() }
+    status(folder_face(folder.name, folder.role) + " · " + count)
 }
 fn show_current(raw){
     messages = raw
@@ -551,13 +645,13 @@ fn classify_some(){
                     }
                 }
                 load_classes()
-                let ok = 0
+                let matched = 0
                 let miss = 0
                 for item in expect {
-                    if classes[item.id] == item.folder { ok = ok + 1 }
+                    if classes[item.id] == item.folder { matched = matched + 1 }
                     else { miss = miss + 1 }
                 }
-                let note = say("class_ok") + ok + say("class_match")
+                let note = say("class_ok") + matched + say("class_match")
                 if miss > 0 { note = note + "，" + miss + say("class_miss") }
                 show_current(messages)
                 status(note)
@@ -596,25 +690,51 @@ fn saved_draft_rows(){
 }
 fn list(){
     if account == nil { return }
+    list_token = list_token + 1
+    list_acc = []
+    let token = list_token
     let wanted = "" + folder.id
     let wanted_name = "" + folder.name
-    host.request("mail.list", {account: account.id folder: wanted offset: 0 limit: 100}, fn(r){
+    let wanted_role = ""
+    if folder.role != nil { wanted_role = "" + folder.role }
+    load_list_page(token, wanted, wanted_name, wanted_role, 0)
+}
+fn load_list_page(token, wanted, wanted_name, wanted_role, offset){
+    host.request("mail.list", {account: account.id folder: wanted offset: offset limit: 25}, fn(r){
+        if token != list_token { return }
         if ("" + folder.id) != wanted { return }
         if !r.is_ok { status(local_error(r.error)); return }
         if r.data != nil && r.data.folder != nil && ("" + r.data.folder) != wanted { return }
         let raw = []
         if r.data != nil && r.data.messages != nil { raw = r.data.messages }
-        if wanted == "INBOX" || wanted_name == "Inbox" { recent = raw }
-        if folder.role == "drafts" {
-            let merged = saved_draft_rows()
-            for m in raw { merged.push(m) }
-            raw = merged
+        for m in raw { list_acc.push(m) }
+        let total = list_acc.len()
+        if r.data != nil && r.data.total != nil { total = r.data.total }
+        list_total = total
+        if raw.len() > 0 && list_acc.len() < list_shown && list_acc.len() < total {
+            load_list_page(token, wanted, wanted_name, wanted_role, list_acc.len())
+            return
         }
-        show_current(raw)
+        list_loaded = list_acc.len()
+        let shown = []
+        for m in list_acc { shown.push(m) }
+        if wanted == "INBOX" || wanted_name == "Inbox" { recent = shown }
+        if wanted_role == "drafts" {
+            let merged = saved_draft_rows()
+            for m in shown { merged.push(m) }
+            shown = merged
+        }
+        show_current(shown)
     })
 }
+fn show_more(){
+    list_shown = list_shown + 25
+    list()
+}
 fn open_message(m){
-    if m.local_draft == true { open_saved_draft(m.id); return }
+    let mid = ""
+    if m.id != nil { mid = "" + m.id }
+    if mid.search("local-") == 0 { open_saved_draft(mid); return }
     open_id = m.id
     host.request("mail.message", {account: account.id folder: folder.id message: m.id}, fn(r){
         if r.is_ok {
@@ -1223,9 +1343,9 @@ fn apply_chrome(){
     ui.btn_draft.set_text(say("draft"))
     ui.btn_send.set_text(say("send"))
     ui.btn_settings_back.set_text(say("back"))
-    ui.c_to.set_empty_text(say("to"))
-    ui.c_subject.set_empty_text(say("subject"))
-    ui.c_body.set_empty_text(say("message"))
+    ui.cap_to.set_text(say("to"))
+    ui.cap_subject.set_text(say("subject"))
+    ui.cap_body.set_text(say("message"))
     ui.welcome_lead.set_text(say("welcome"))
     ui.btn_add_welcome.set_text(say("add_account"))
     ui.btn_add_rail.set_text(say("add_account"))
@@ -1235,17 +1355,18 @@ fn apply_chrome(){
     ui.confirm_title.set_text(say("remove_ask"))
     ui.btn_remove_cancel.set_text(say("cancel"))
     ui.agent_title.set_text(say("agent"))
-    ui.agent_input.set_empty_text(say("ask"))
+    ui.cap_ask.set_text(say("ask"))
     ui.btn_ask_send.set_text(say("send"))
     ui.btn_new_chat.set_text(say("new_chat"))
     ui.draft_prompt.set_text(say("draft_prompt"))
-    ui.draft_idea.set_empty_text(say("let_ai"))
+    ui.cap_idea.set_text(say("let_ai"))
     ui.btn_draft_cancel.set_text(say("cancel"))
     ui.btn_draft_send.set_text(say("send"))
-    ui.custom_field.set_empty_text(say("lang_name"))
+    ui.cap_lang.set_text(say("lang_name"))
     ui.rows.render()
     ui.settings_accounts.render()
     ui.rail_slot.render()
+    show_heading()
     ui.chat_view.render()
     ui.history_list.render()
 }
@@ -1631,6 +1752,35 @@ fn toggle_history(){
     history_open = !history_open
     ui.history_pane.set_visible(history_open)
     if history_open { ui.history_list.render() }
+}
+fn undouble(text){
+    if text == nil { return "" }
+    let t = ("" + text).trim()
+    let words = t.split(" ")
+    let n = words.len()
+    if n < 4 || n > 40 { return t }
+    let half = 0
+    let i = 0
+    loop {
+        if i >= n { break }
+        half = half + 1
+        i = i + 2
+    }
+    if half < 2 || half + half < n - 3 { return t }
+    i = 0
+    loop {
+        if i >= half { break }
+        if words[i] != words[half + i] { return t }
+        i = i + 1
+    }
+    let out = ""
+    i = 0
+    loop {
+        if i >= half { return out }
+        if out != "" { out = out + " " }
+        out = out + words[i]
+        i = i + 1
+    }
 }
 fn clip(text, n){
     if text == nil { return "" }
@@ -2264,14 +2414,15 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
                                     } else for f in found {
                                         let fid = "" + f.id
                                         let fname = "" + f.name
+                                        let face = folder_face(f.name, f.role)
                                         let aid = "" + a.id
                                         if folder_selected(a, f) {
                                             GestureView{width: Fill height: 32 flow: Right align: Align{y: 0.5} padding: Inset{left: 28 right: 8} on_tap: |x, y| { commit_rename(); select_named(aid, fid, fname) }
-                                                Label{width: Fill text: fname max_lines: 1 draw_text.color: accent draw_text.text_style: theme.font_bold{font_size: 14}}
+                                                Label{width: Fill text: face max_lines: 1 draw_text.color: accent draw_text.text_style: theme.font_bold{font_size: 14}}
                                             }
                                         } else {
                                             GestureView{width: Fill height: 32 flow: Right align: Align{y: 0.5} padding: Inset{left: 28 right: 8} on_tap: |x, y| { commit_rename(); select_named(aid, fid, fname) }
-                                                Label{width: Fill text: fname max_lines: 1 draw_text.color: ink draw_text.text_style.font_size: 14}
+                                                Label{width: Fill text: face max_lines: 1 draw_text.color: ink draw_text.text_style.font_size: 14}
                                             }
                                         }
                                     }
@@ -2341,11 +2492,16 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
                     }
                     else for m in messages {
                         if m.unread {
-                            Row{on_tap: |x, y| open_message(m) top.sender.text: m.sender top.time.text: m.time subject.text: m.subject preview.text: m.preview}
+                            Row{on_tap: |x, y| open_message(m) top.sender.text: m.sender top.time.text: m.time subject.text: m.subject preview.text: undouble(m.preview)}
                         } else {
-                            RowRead{on_tap: |x, y| open_message(m) top.sender.text: m.sender top.time.text: m.time subject.text: m.subject preview.text: m.preview}
+                            RowRead{on_tap: |x, y| open_message(m) top.sender.text: m.sender top.time.text: m.time subject.text: m.subject preview.text: undouble(m.preview)}
                         }
                         Hr{}
+                    }
+                    if list_total > list_loaded {
+                        View{width: Fill height: Fit align: Align{x: 0.5} padding: Inset{top: 8 bottom: 16}
+                            Bar{text: say("show_more") on_click: || show_more()}
+                        }
                     }
                 }}
             }
@@ -2378,9 +2534,12 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
             btn_draft := Bar{text: "草稿" on_click: || open_draft_sheet()}
             btn_send := Bar{text: "发送" on_click: || send()}
         }
-        c_to := Field{empty_text: "收件人" on_change: |text| touch_draft()}
-        c_subject := Field{empty_text: "主题" on_change: |text| touch_draft()}
-        c_body := Field{is_multiline: true width: Fill height: Fill empty_text: "正文" padding: Inset{left: 14 right: 14 top: 12 bottom: 12} on_change: |text| touch_draft()}
+        cap_to := Label{text: "收件人" draw_text.color: secondary draw_text.text_style.font_size: 12}
+        c_to := Field{empty_text: "" on_change: |text| touch_draft()}
+        cap_subject := Label{text: "主题" draw_text.color: secondary draw_text.text_style.font_size: 12}
+        c_subject := Field{empty_text: "" on_change: |text| touch_draft()}
+        cap_body := Label{text: "正文" draw_text.color: secondary draw_text.text_style.font_size: 12}
+        c_body := Field{is_multiline: true width: Fill height: Fill empty_text: "" padding: Inset{left: 14 right: 14 top: 12 bottom: 12} on_change: |text| touch_draft()}
         c_note := Label{width: Fill text: "" draw_text.color: #xff3b30 draw_text.text_style.font_size: 12}
     }
             settings_pane := SolidView{visible: false width: Fill height: Fill flow: Down draw_bg.color: #xffffff padding: Inset{left: 16 right: 16 top: 8 bottom: 16} spacing: 12
@@ -2478,8 +2637,9 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
                                 Label{width: Fill text: "Others" draw_text.color: ink draw_text.text_style.font_size: 15}}
                         }
                     }
-                    lang_custom := View{visible: false width: Fill height: Fit
-                        custom_field := TextInput{width: Fill height: 40 empty_text: "语言名称" on_change: |text| save_custom(text)
+                    lang_custom := View{visible: false width: Fill height: Fit flow: Down spacing: 4
+                        cap_lang := Label{text: "语言名称" draw_text.color: secondary draw_text.text_style.font_size: 12}
+                        custom_field := TextInput{width: Fill height: 40 empty_text: "" on_change: |text| save_custom(text)
                             draw_bg +: {color: #xf2f2f7 color_hover: #xf2f2f7 color_focus: #xf2f2f7 color_empty: #xf2f2f7
                                 border_color: #x00000000 border_radius: 10.0}
                             draw_text +: {color: ink color_hover: ink color_focus: ink color_empty: secondary}}
@@ -2560,15 +2720,18 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
                     }
                 }}
                 agent_note := Label{width: Fill text: "" draw_text.color: secondary draw_text.text_style.font_size: 12}
-                View{width: Fill height: Fit flow: Right align: Align{y: 0.5} spacing: 4
-                    agent_input := TextInput{width: Fill height: 40 empty_text: "提问" on_change: |text| pending_input = text on_return: |text| ask_agent(text)
+                View{width: Fill height: Fit flow: Down spacing: 4
+                    cap_ask := Label{text: "提问" draw_text.color: secondary draw_text.text_style.font_size: 12}
+                    View{width: Fill height: Fit flow: Right align: Align{y: 0.5} spacing: 4
+                    agent_input := TextInput{width: Fill height: 40 empty_text: "" on_change: |text| pending_input = text on_return: |text| ask_agent(text)
                         draw_bg +: {color: #xffffff color_hover: #xffffff color_focus: #ffffff color_empty: #xffffff
                             border_color: #xe5e5ea border_color_hover: #xe5e5ea border_color_focus: accent border_color_empty: #xe5e5ea border_radius: 10.0}
                         draw_text +: {color: ink color_hover: ink color_focus: ink color_empty: secondary color_empty_hover: secondary}
                     }
                     btn_ask_send := Bar{text: "发送" height: 40 padding: Inset{left: 6 right: 0} on_click: || ask_agent("")}
-                }
                     }
+                }
+                }
                     history_pane := SolidView{visible: false width: Fill height: Fill flow: Down spacing: 8 draw_bg.color: #xfafafa
                         btn_new_chat := Bar{text: "新对话" on_click: || new_chat()}
                         history_list := ScrollYView{width: Fill height: Fill flow: Down spacing: 4 on_render: || {
@@ -2594,7 +2757,8 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
         GestureView{width: 360 height: Fit on_tap: |x, y| { }
             SolidView{width: Fill height: Fit flow: Down padding: 20 spacing: 12 draw_bg +: {color: #xffffffff border_radius: 14.0}
                 draft_prompt := Label{text: "这封信要写什么？" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 18}}
-                draft_idea := TextInput{width: Fill height: 96 empty_text: "让 AI 决定" on_return: |text| send_draft_idea()
+                cap_idea := Label{text: "让 AI 决定" draw_text.color: secondary draw_text.text_style.font_size: 12}
+                draft_idea := TextInput{width: Fill height: 96 empty_text: "" on_return: |text| send_draft_idea()
                     draw_bg +: {color: #xf2f2f7 color_hover: #xf2f2f7 color_focus: #xf2f2f7 color_empty: #xf2f2f7
                         border_color: #x00000000 border_radius: 10.0}
                     draw_text +: {color: ink color_hover: ink color_focus: ink color_empty: secondary}}
