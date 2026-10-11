@@ -395,6 +395,11 @@ fn say(id){
     if id == "class_ok" { return at5(i, "Read back: ", "读回确认：", "Relecture : ", "読み戻し：", "Прочитано: ") }
     if id == "class_match" { return at5(i, " classifications match the record", " 条分类与记录一致", " classements correspondent", " 件の分類が記録と一致", " классификаций совпали") }
     if id == "class_miss" { return at5(i, " did not match", " 条没有对上", " ne correspondent pas", " 件が一致しません", " не совпали") }
+    if id == "budget" { return at5(i, "Today's model allowance is used up.", "今天的模型额度已经用完。", "Le quota du modèle pour aujourd'hui est épuisé.", "今日のモデル利用枠を使い切りました。", "Дневной лимит модели исчерпан.") }
+    if id == "rate" { return at5(i, "Too many model calls. Wait a moment.", "模型调用太频繁，请稍等。", "Trop d'appels au modèle. Patientez.", "モデルの呼び出しが多すぎます。少し待ってください。", "Слишком много вызовов модели. Подождите.") }
+    if id == "no_provider" { return at5(i, "No AI provider is set up.", "还没有设置 AI 提供方。", "Aucun fournisseur d'IA n'est configuré.", "AI プロバイダが未設定です。", "Поставщик ИИ не настроен.") }
+    if id == "provider_down" { return at5(i, "The AI provider did not answer.", "AI 提供方没有回应。", "Le fournisseur d'IA n'a pas répondu.", "AI プロバイダから応答がありません。", "Поставщик ИИ не ответил.") }
+    if id == "bad_answer" { return at5(i, "The model's answer could not be used.", "模型的回答无法使用。", "La réponse du modèle est inutilisable.", "モデルの回答を使えません。", "Ответ модели нельзя использовать.") }
     return at5(i, "Something went wrong.", "出现未知错误。", "Une erreur inconnue s'est produite.", "不明なエラーが起きました。", "Произошла неизвестная ошибка.")
 }
 fn local_error(raw){
@@ -427,6 +432,11 @@ fn local_error(raw){
     if t.search("foreground_required") >= 0 { return say("cal_foreground") }
     if t.search("invalid_handle") >= 0 || t.search("calendar_changed") >= 0 { return say("no_calendar") }
     if t.search("Invalid start_ms") >= 0 || t.search("Invalid end_ms") >= 0 || t.search("Time window") >= 0 || t.search("timezone") >= 0 { return say("bad_time") }
+    if t.search("tokens for today") >= 0 || t.search("model calls for today") >= 0 { return say("budget") }
+    if t.search("model calls a minute") >= 0 { return say("rate") }
+    if t.search("No AI provider is set up") >= 0 || t.search("could not be read") >= 0 { return say("no_provider") }
+    if t.search("No AI provider answered") >= 0 { return say("provider_down") }
+    if t.search("answer was refused") >= 0 { return say("bad_answer") }
     return say("unknown")
 }
 fn add_account(){
