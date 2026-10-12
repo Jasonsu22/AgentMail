@@ -9,7 +9,7 @@ your password.
 ## Features
 
 - **Read & manage mail** — inbox, folders, compose, reply, send
-- **AI capabilities** — tap Summarize on any message and let the assistant work for you
+- **AI summaries and safety hints** — on request, summarize a message and conservatively flag phishing, fraud requests, and suspicious links without treating ordinary personal or marketing mail as malicious by default
 - **Host-owned credentials** — sign in on the device's own sheet; passwords stay in the platform keychain
 - **Offline-first UI** — the assistant is optional; every screen works without it
 
