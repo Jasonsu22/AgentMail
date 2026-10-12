@@ -2623,7 +2623,7 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
         View{width: Fill height: Fit flow: Right align: Align{y: 0.5}
             btn_cancel := Bar{text: "取消" on_click: || back_to_inbox()}
             View{width: Fill height: 1}
-            btn_draft := Bar{text: "帮我写" on_click: || open_draft_sheet()}
+            btn_draft := Bar{text: "AI 帮写" on_click: || open_draft_sheet()}
             btn_send := Bar{text: "发送" on_click: || send()}
         }
         cap_to := Label{text: "收件人" draw_text.color: secondary draw_text.text_style.font_size: 12}
