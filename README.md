@@ -10,6 +10,7 @@ your password.
 
 - **Read & manage mail** — inbox, folders, compose, reply, send
 - **AI capabilities** — tap Summarize on any message and let the assistant work for you
+- **Calendar lifecycle** — recognize new, rescheduled, and cancelled activities; detect duplicates and conflicts in the macOS calendar, then create, update, or delete only after another confirmation and native review
 - **Host-owned credentials** — sign in on the device's own sheet; passwords stay in the platform keychain
 - **Offline-first UI** — the assistant is optional; every screen works without it
 

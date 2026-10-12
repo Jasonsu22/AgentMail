@@ -33,6 +33,12 @@ let pending_input = ""
 let pending_event = nil
 let device_calendar_handles = {}
 let device_calendar_keys = []
+let pending_calendar_stage = ""
+let pending_calendar_match = nil
+let pending_calendar_candidates = []
+let pending_calendar_handle = ""
+let pending_calendar_draft = nil
+let pending_calendar_shown = ""
 let turn_can_add = false
 let follow_gen = 0
 let follow_locked = false
@@ -394,6 +400,19 @@ fn say(id){
     if id == "readback_fail" { return at5(i, "Read-back failed. The schedule was not found.", "读回失败：写入后没有在日程记录里找到这一条。", "Relecture échouée : l'horaire n'a pas été retrouvé.", "読み戻し失敗：予定記録に見つかりません。", "Проверка не удалась: запись не найдена.") }
     if id == "calendar_add_failed" { return at5(i, "Calendar did not return a result for this write.", "日历写入没有返回结果，请重试。", "Le calendrier n'a renvoyé aucun résultat pour cet ajout.", "カレンダーへの書き込み結果が返されませんでした。", "Календарь не вернул результат записи.") }
     if id == "calendar_readback_failed" { return at5(i, "Calendar did not return a result for the read-back.", "日历读回没有返回结果；请在日历中核对这一条。", "Le calendrier n'a renvoyé aucun résultat de relecture.", "カレンダーの読み戻し結果が返されませんでした。", "Календарь не вернул результат проверки.") }
+    if id == "calendar_duplicate" { return at5(i, "The same activity already exists on this date. Add another copy?", "同一日期已经有相同活动。是否仍要重复添加？", "La même activité existe déjà à cette date. Ajouter une copie ?", "同じ日付に同じ予定があります。重複して追加しますか？", "На эту дату уже есть такое событие. Добавить ещё одну копию?") }
+    if id == "calendar_update_ask" { return at5(i, "This activity exists at another time. Replace the old time with the new one?", "发现同一活动原来安排在其他时间。是否用新时间更新旧日程？", "Cette activité existe à une autre heure. Remplacer l'ancien horaire ?", "同じ予定が別の時刻にあります。新しい時刻へ更新しますか？", "Это событие назначено на другое время. Заменить старое время новым?") }
+    if id == "calendar_delete_ask" { return at5(i, "The email says this activity was cancelled. Delete this calendar event?", "邮件显示该活动已取消。是否删除这条日程？", "Le message indique l'annulation. Supprimer cet événement ?", "メールでは予定が中止されています。この予定を削除しますか？", "В письме сказано, что событие отменено. Удалить его?") }
+    if id == "calendar_add_unmatched" { return at5(i, "No earlier matching event was found. Add the new schedule as a separate event?", "没有找到可更新的旧日程。是否把新时间作为一条新日程添加？", "Aucun ancien événement correspondant. Ajouter le nouvel horaire séparément ?", "更新対象の古い予定がありません。新しい予定として追加しますか？", "Подходящее старое событие не найдено. Добавить новое отдельно?") }
+    if id == "calendar_choose" { return at5(i, "Several calendar events may match. Reply with the number or date of exactly one event; nothing will be changed until you choose.", "找到多个可能匹配的日程。请回复一个日程的编号或日期；在你明确选择前不会进行修改。", "Plusieurs événements correspondent peut-être. Répondez avec un numéro ou une date précise ; rien ne sera modifié avant votre choix.", "候補が複数あります。1件の番号または日付を返信してください。選択するまで変更しません。", "Найдено несколько вариантов. Ответьте номером или датой одного события; до выбора ничего не изменится.") }
+    if id == "calendar_no_match" { return at5(i, "No matching calendar event was found, so nothing was changed.", "没有找到匹配的日程，因此没有进行任何修改。", "Aucun événement correspondant ; rien n'a été modifié.", "一致する予定がないため、変更しませんでした。", "Подходящее событие не найдено, изменения не внесены.") }
+    if id == "calendar_updated" { return at5(i, "The calendar event was updated.", "日程已更新。", "L'événement a été mis à jour.", "予定を更新しました。", "Событие обновлено.") }
+    if id == "calendar_deleted" { return at5(i, "The calendar event was deleted.", "日程已删除。", "L'événement a été supprimé.", "予定を削除しました。", "Событие удалено.") }
+    if id == "calendar_change_cancelled" { return at5(i, "No calendar change was made.", "已取消，本次没有修改日程。", "Aucune modification du calendrier.", "キャンセルしました。予定は変更していません。", "Отменено, календарь не изменён.") }
+    if id == "calendar_complex" { return at5(i, "That event is recurring or has attendees, so this API can only read it. Nothing was changed.", "该日程是重复事件或包含参与者，当前接口只能读取，未进行修改。", "Cet événement est récurrent ou contient des participants ; il est en lecture seule.", "繰り返し予定または参加者付き予定のため、読み取り専用です。変更していません。", "Это повторяющееся событие или событие с участниками; оно доступно только для чтения.") }
+    if id == "calendar_too_many" { return at5(i, "The calendar result was truncated. Narrow the activity or date before changing anything.", "日历结果过多。请进一步明确活动或日期后再修改。", "Il y a trop de résultats. Précisez l'activité ou la date.", "候補が多すぎます。活動名や日付を詳しく指定してください。", "Слишком много результатов. Уточните событие или дату.") }
+    if id == "calendar_conflict" { return at5(i, "The event changed in another calendar app. Review the latest version before trying again.", "该日程已被其他日历应用修改。请查看最新版本后重新确认。", "L'événement a changé dans une autre application. Vérifiez la dernière version.", "別のカレンダーアプリで変更されています。最新版を確認してください。", "Событие изменено в другом приложении. Проверьте последнюю версию.") }
+    if id == "calendar_current" { return at5(i, "The calendar already contains this activity at the new time. Nothing was changed.", "日历中已经有该活动的新时间，因此没有进行修改。", "Le calendrier contient déjà cette activité au nouvel horaire. Rien n'a été modifié.", "新しい時刻の予定がすでにあります。変更していません。", "Событие уже стоит на новое время. Изменения не внесены.") }
     if id == "class_ok" { return at5(i, "Read back: ", "读回确认：", "Relecture : ", "読み戻し：", "Прочитано: ") }
     if id == "class_match" { return at5(i, " classifications match the record", " 条分类与记录一致", " classements correspondent", " 件の分類が記録と一致", " классификаций совпали") }
     if id == "class_miss" { return at5(i, " did not match", " 条没有对上", " ne correspondent pas", " 件が一致しません", " не совпали") }
@@ -430,6 +449,8 @@ fn local_error(raw){
     if t.search("unsupported_platform") >= 0 { return say("cal_unsupported") }
     if t.search("Calendar review closed") >= 0 || t.search("trusted_input_required") >= 0 { return say("cal_cancelled") }
     if t.search("read_only") >= 0 { return say("cal_readonly") }
+    if t.search("unsupported_event") >= 0 { return say("calendar_complex") }
+    if t.search("conflict:") >= 0 { return say("calendar_conflict") }
     if t.search("host_not_configured") >= 0 { return say("cal_unconfigured") }
     if t.search("foreground_required") >= 0 { return say("cal_foreground") }
     if t.search("invalid_handle") >= 0 || t.search("calendar_changed") >= 0 { return say("no_calendar") }
@@ -1282,15 +1303,20 @@ fn plan_schema(){
         }}
 }
 fn event_schema(){
-    return {type: "object" required: ["found" "title" "start" "end" "location" "start_ms" "end_ms" "timezone"] additionalProperties: false
+    return {type: "object" required: ["found" "intent" "title" "start" "end" "location" "start_ms" "end_ms" "previous_start" "previous_end" "previous_start_ms" "previous_end_ms" "timezone"] additionalProperties: false
         properties: {
             found: {type: "string" enum: ["yes" "no"]}
+            intent: {type: "string" enum: ["create" "reschedule" "cancel" "none"]}
             title: {type: "string" maxLength: 200}
             start: {type: "string" maxLength: 80}
             end: {type: "string" maxLength: 80}
             location: {type: "string" maxLength: 200}
             start_ms: {type: "integer"}
             end_ms: {type: "integer"}
+            previous_start: {type: "string" maxLength: 80}
+            previous_end: {type: "string" maxLength: 80}
+            previous_start_ms: {type: "integer"}
+            previous_end_ms: {type: "integer"}
             timezone: {type: "string" maxLength: 80}
         }}
 }
@@ -1543,13 +1569,66 @@ fn event_brief(){
     if pending_event == nil { return "" }
     let place = pending_event.location
     if place == nil { place = "" }
-    return pending_event.title + " | " + pending_event.start + " – " + pending_event.end + " | " + place
+    return pending_event.intent + " | " + pending_event.title + " | " + pending_event.start + " – " + pending_event.end + " | " + place
 }
 fn calendar_optional(value, key, fallback){
     if value == nil { return fallback }
     let found = try { value[key] } catch { nil }
     if found == nil { return fallback }
     return found
+}
+let calendar_title_specials = ["\\" "." "*" "+" "?" "(" ")" "[" "]" "{" "}" "|" "^" "$"]
+fn calendar_escape(text){
+    let out = "" + text
+    for c in calendar_title_specials { out = out.replace(c, "\\" + c) }
+    return out
+}
+fn calendar_title(text){
+    if text == nil { return "" }
+    let out = ("" + text).replace(regex("^(re|fw|fwd|updated|update|rescheduled|cancelled|canceled|变更|改期|取消)[\\s:：-]+", "i"), "")
+    out = out.replace(regex("[\\[\\]()（）_:：–—-]+", "g"), " ")
+    return out.replace(regex("\\s+", "g"), " ").trim()
+}
+fn calendar_titles_match(a, b){
+    let left = calendar_title(a)
+    let right = calendar_title(b)
+    if left == "" || right == "" { return false }
+    if regex("^" + calendar_escape(left) + "$", "i").test(right) { return true }
+    if left.len() >= 6 && regex(calendar_escape(left), "i").test(right) { return true }
+    if right.len() >= 6 && regex(calendar_escape(right), "i").test(left) { return true }
+    return false
+}
+fn calendar_abs(n){ if n < 0 { return -n }; return n }
+fn calendar_two(n){ if n < 10 { return "0" + n }; return "" + n }
+fn calendar_date(ms){
+    if ms == nil || ms <= 0 { return "" }
+    let t = local_time(ms / 1000)
+    return "" + t.year + "-" + calendar_two(t.month) + "-" + calendar_two(t.day)
+}
+fn calendar_time_label(ms){
+    if ms == nil || ms <= 0 { return "" }
+    let t = local_time(ms / 1000)
+    return calendar_date(ms) + " " + calendar_two(t.hour) + ":" + calendar_two(t.minute)
+}
+fn same_calendar_day(a, b){
+    if a == nil || b == nil || a <= 0 || b <= 0 { return false }
+    return calendar_date(a) == calendar_date(b)
+}
+fn device_event_line(event){
+    let line = event.title + " | " + calendar_time_label(event.start_ms)
+    if event.end_ms != nil && event.end_ms > 0 { line = line + " – " + calendar_time_label(event.end_ms) }
+    if event.timezone != nil && event.timezone != "" { line = line + " | " + event.timezone }
+    if event.location != nil && event.location != "" { line = line + " | " + event.location }
+    return line
+}
+fn clear_calendar_decision(){
+    pending_calendar_stage = ""
+    pending_calendar_match = nil
+    pending_calendar_candidates = []
+    pending_calendar_handle = ""
+    pending_calendar_draft = nil
+    pending_calendar_shown = ""
+    pending_event = nil
 }
 fn finish_device_calendar_error(answer){
     if answer.error == "" { finish_tool(say("calendar_add_failed")) }
@@ -1568,8 +1647,158 @@ fn create_device_calendar_event(handle, event, shown){
                 finish_tool(say("calendar_add_failed"))
                 return
             }
-            pending_event = nil
+            clear_calendar_decision()
             finish_tool(say("os_saved") + "\n" + shown)
+        })
+    })
+}
+fn update_device_calendar_event(){
+    let existing = pending_calendar_match
+    if existing == nil || pending_calendar_handle == "" || pending_calendar_draft == nil { clear_calendar_decision(); finish_tool(say("calendar_no_match")); return }
+    let location = pending_calendar_draft.location
+    if location == nil || location == "" { location = calendar_optional(existing, "location", "") }
+    let notes = calendar_optional(existing, "notes", "")
+    let replacement = {title: pending_calendar_draft.title start_ms: pending_calendar_draft.start_ms end_ms: pending_calendar_draft.end_ms timezone: pending_calendar_draft.timezone location: location notes: notes}
+    host.request("device_calendar.events.update", {handle: pending_calendar_handle event_id: existing.id revision: existing.revision event: replacement}, fn(r){
+        let answer = {is_ok: calendar_optional(r, "is_ok", false) data: calendar_optional(r, "data", nil) error: calendar_optional(r, "error", "")}
+        start_timeout(0.01, || {
+            if !answer.is_ok {
+                if answer.error.search("conflict:") >= 0 { clear_calendar_decision() }
+                finish_device_calendar_error(answer)
+                return
+            }
+            if calendar_optional(answer.data, "saved", false) != true { finish_tool(say("calendar_add_failed")); return }
+            let shown = pending_calendar_shown
+            clear_calendar_decision()
+            finish_tool(say("calendar_updated") + "\n" + shown)
+        })
+    })
+}
+fn delete_device_calendar_event(){
+    let existing = pending_calendar_match
+    if existing == nil || pending_calendar_handle == "" { clear_calendar_decision(); finish_tool(say("calendar_no_match")); return }
+    host.request("device_calendar.events.delete", {handle: pending_calendar_handle event_id: existing.id revision: existing.revision}, fn(r){
+        let answer = {is_ok: calendar_optional(r, "is_ok", false) data: calendar_optional(r, "data", nil) error: calendar_optional(r, "error", "")}
+        start_timeout(0.01, || {
+            if !answer.is_ok {
+                if answer.error.search("conflict:") >= 0 { clear_calendar_decision() }
+                finish_device_calendar_error(answer)
+                return
+            }
+            if calendar_optional(answer.data, "deleted", false) != true { finish_tool(say("calendar_add_failed")); return }
+            let shown = device_event_line(existing)
+            clear_calendar_decision()
+            finish_tool(say("calendar_deleted") + "\n" + shown)
+        })
+    })
+}
+fn calendar_candidates_text(){
+    let text = say("calendar_choose")
+    for i in pending_calendar_candidates.len() { text = text + "\n" + (i + 1) + ". " + device_event_line(pending_calendar_candidates[i]) }
+    return text
+}
+fn ask_calendar_choice(events){
+    pending_calendar_candidates = []
+    let n = events.len()
+    if n > 5 { n = 5 }
+    for i in n { pending_calendar_candidates.push(events[i]) }
+    pending_calendar_stage = "choose"
+    finish_tool(calendar_candidates_text())
+}
+fn decide_calendar_match(existing, exact){
+    if existing == nil { clear_calendar_decision(); finish_tool(say("calendar_no_match")); return }
+    if calendar_optional(existing, "recurring", false) == true || calendar_optional(existing, "has_attendees", false) == true {
+        clear_calendar_decision()
+        finish_tool(say("calendar_complex") + "\n" + device_event_line(existing))
+        return
+    }
+    pending_calendar_match = existing
+    let old_line = device_event_line(existing)
+    if pending_event.intent == "cancel" {
+        pending_calendar_stage = "delete"
+        finish_tool(say("calendar_delete_ask") + "\n" + old_line)
+        return
+    }
+    if pending_event.intent == "reschedule" {
+        pending_calendar_stage = "update"
+        finish_tool(say("calendar_update_ask") + "\n" + old_line + "\n→ " + pending_calendar_shown)
+        return
+    }
+    if exact || same_calendar_day(existing.start_ms, pending_calendar_draft.start_ms) {
+        pending_calendar_stage = "duplicate"
+        finish_tool(say("calendar_duplicate") + "\n" + old_line)
+        return
+    }
+    pending_calendar_stage = "update"
+    finish_tool(say("calendar_update_ask") + "\n" + old_line + "\n→ " + pending_calendar_shown)
+}
+fn inspect_calendar_matches(answer){
+    let events = calendar_optional(answer.data, "events", [])
+    let related = []
+    let exact = []
+    let anchor = pending_event.start_ms
+    if pending_event.intent == "reschedule" && pending_event.previous_start_ms > 0 { anchor = pending_event.previous_start_ms }
+    for event in events {
+        if calendar_titles_match(pending_event.title, event.title) {
+            related.push(event)
+            if anchor > 0 && calendar_abs(event.start_ms - anchor) <= 300000 { exact.push(event) }
+        }
+    }
+    let truncated = calendar_optional(answer.data, "truncated", false) == true
+    if truncated && exact.len() == 0 {
+        clear_calendar_decision()
+        finish_tool(say("calendar_too_many"))
+        return
+    }
+    if pending_event.intent == "reschedule" && pending_event.previous_start_ms <= 0 {
+        if truncated {
+            clear_calendar_decision()
+            finish_tool(say("calendar_too_many"))
+            return
+        }
+        if related.len() > 1 { ask_calendar_choice(related); return }
+        if exact.len() == 1 {
+            let shown = device_event_line(exact[0])
+            clear_calendar_decision()
+            finish_tool(say("calendar_current") + "\n" + shown)
+            return
+        }
+    }
+    if exact.len() == 1 { decide_calendar_match(exact[0], true); return }
+    if exact.len() > 1 { ask_calendar_choice(exact); return }
+    if related.len() == 1 { decide_calendar_match(related[0], false); return }
+    if related.len() > 1 { ask_calendar_choice(related); return }
+    if pending_event.intent == "cancel" {
+        clear_calendar_decision()
+        finish_tool(say("calendar_no_match"))
+        return
+    }
+    if pending_event.intent == "reschedule" {
+        pending_calendar_stage = "create_unmatched"
+        finish_tool(say("calendar_add_unmatched") + "\n" + pending_calendar_shown)
+        return
+    }
+    create_device_calendar_event(pending_calendar_handle, pending_calendar_draft, pending_calendar_shown)
+}
+fn inspect_device_calendar(handle, event, shown){
+    pending_calendar_handle = handle
+    pending_calendar_draft = event
+    pending_calendar_shown = shown
+    let anchor = pending_event.start_ms
+    if pending_event.intent == "reschedule" && pending_event.previous_start_ms > 0 { anchor = pending_event.previous_start_ms }
+    if anchor == nil || anchor <= 0 { anchor = floor(time_now() * 1000) + 30 * 86400000 }
+    let window_start = anchor - 46 * 86400000
+    if window_start < 1 { window_start = 1 }
+    let window_end = window_start + 92 * 86400000
+    host.request("device_calendar.events.list", {handle: handle start_ms: window_start end_ms: window_end limit: 200}, fn(r){
+        let answer = {is_ok: calendar_optional(r, "is_ok", false) data: calendar_optional(r, "data", nil) error: calendar_optional(r, "error", "")}
+        start_timeout(0.01, || {
+            if !answer.is_ok {
+                if answer.error.search("invalid_handle") >= 0 || answer.error.search("calendar_changed") >= 0 { forget_device_calendar_handle() }
+                finish_device_calendar_error(answer)
+                return
+            }
+            inspect_calendar_matches(answer)
         })
     })
 }
@@ -1593,7 +1822,7 @@ fn select_device_calendar(event, shown){
                     let handle = calendar_optional(result.data, "handle", "")
                     if handle == "" { finish_tool(say("no_calendar")); return }
                     remember_device_calendar_handle(handle)
-                    create_device_calendar_event(handle, event, shown)
+                    inspect_device_calendar(handle, event, shown)
                 })
             })
         })
@@ -1610,7 +1839,7 @@ fn request_device_calendar_permission(event, shown){
 }
 fn prepare_device_calendar_event(event, shown){
     let handle = selected_device_calendar_handle()
-    if handle != "" { create_device_calendar_event(handle, event, shown); return }
+    if handle != "" { inspect_device_calendar(handle, event, shown); return }
     host.request("device_calendar.permission.status", {}, fn(r){
         let answer = {is_ok: calendar_optional(r, "is_ok", false) data: calendar_optional(r, "data", nil) error: calendar_optional(r, "error", "")}
         start_timeout(0.01, || {
@@ -1633,10 +1862,11 @@ fn begin_calendar_event(){
     let end_ms = pending_event.end_ms
     let timezone = pending_event.timezone
     let location = pending_event.location
-    if start_ms == nil || end_ms == nil || start_ms <= 0 || end_ms <= start_ms { finish_tool(say("bad_time")); return }
+    if pending_event.intent != "cancel" && (start_ms == nil || end_ms == nil || start_ms <= 0 || end_ms <= start_ms) { finish_tool(say("bad_time")); return }
     if timezone == nil || timezone == "" { timezone = "Asia/Shanghai" }
     if location == nil { location = "" }
-    let shown = title + "\n" + start
+    let shown = title
+    if start != nil && start != "" { shown = shown + "\n" + start }
     if end != nil && end != "" { shown = shown + " – " + end }
     if location != "" { shown = shown + "\n" + location }
     agent_busy = true
@@ -1652,9 +1882,57 @@ fn agrees(text){
 }
 fn declines(text){
     let t = text.trim()
-    if t == "不要" || t == "不用" || t == "否" || t == "取消" { return true }
-    if t == "no" || t == "No" || t == "NO" || t == "cancel" || t == "Cancel" { return true }
+    if t == "不要" || t == "不用" || t == "否" || t == "取消" || t == "不修改" || t == "不删除" || t == "不重复" || t == "保留" { return true }
+    if t == "no" || t == "No" || t == "NO" || t == "cancel" || t == "Cancel" || t == "keep" || t == "Keep" || t == "no change" { return true }
     return false
+}
+fn confirms_calendar_action(text){
+    if agrees(text) { return true }
+    let t = text.trim()
+    if t == "确认" || t == "是的" || t == "确定" || t == "只删除这个" { return true }
+    if pending_calendar_stage == "duplicate" && (t == "重复添加" || t == "仍然添加" || t == "继续添加") { return true }
+    if pending_calendar_stage == "update" && (t == "更新" || t == "确认更新" || t == "替换" || t == "修改") { return true }
+    if pending_calendar_stage == "delete" && (t == "删除" || t == "确认删除" || t == "移除") { return true }
+    if pending_calendar_stage == "create_unmatched" && (t == "新增" || t == "作为新日程添加") { return true }
+    if t == "confirm" || t == "Confirm" || t == "update" || t == "Update" || t == "delete" || t == "Delete" || t == "replace" || t == "Replace" { return true }
+    return false
+}
+fn choose_calendar_candidate(text){
+    let t = text.trim()
+    let chosen = nil
+    let ambiguous = false
+    for i in pending_calendar_candidates.len() {
+        let number = "" + (i + 1)
+        let date = calendar_date(pending_calendar_candidates[i].start_ms)
+        let hit = t == number || t.search("第" + number + "个") >= 0 || (date != "" && t.search(date) >= 0)
+        if hit {
+            if chosen != nil { ambiguous = true }
+            else { chosen = pending_calendar_candidates[i] }
+        }
+    }
+    if chosen == nil || ambiguous { finish_tool(calendar_candidates_text()); return }
+    pending_calendar_candidates = []
+    decide_calendar_match(chosen, false)
+}
+fn execute_calendar_decision(){
+    agent_busy = true
+    ui.agent_note.set_text(say("thinking"))
+    if pending_calendar_stage == "duplicate" || pending_calendar_stage == "create_unmatched" {
+        create_device_calendar_event(pending_calendar_handle, pending_calendar_draft, pending_calendar_shown)
+        return
+    }
+    if pending_calendar_stage == "update" { update_device_calendar_event(); return }
+    if pending_calendar_stage == "delete" { delete_device_calendar_event(); return }
+    clear_calendar_decision()
+    finish_tool(say("calendar_change_cancelled"))
+}
+fn calendar_confirmation_text(){
+    if pending_calendar_stage == "duplicate" { return say("calendar_duplicate") + "\n" + device_event_line(pending_calendar_match) }
+    if pending_calendar_stage == "update" { return say("calendar_update_ask") + "\n" + device_event_line(pending_calendar_match) + "\n→ " + pending_calendar_shown }
+    if pending_calendar_stage == "delete" { return say("calendar_delete_ask") + "\n" + device_event_line(pending_calendar_match) }
+    if pending_calendar_stage == "create_unmatched" { return say("calendar_add_unmatched") + "\n" + pending_calendar_shown }
+    if pending_calendar_stage == "choose" { return calendar_candidates_text() }
+    return say("calendar_change_cancelled")
 }
 fn at_tail(){
     let y = try { ui.chat_view.scroll_y() } catch { -1 }
@@ -1979,7 +2257,7 @@ fn react_next(){
     react_step = react_step + 1
     ui.agent_note.set_text(say("thinking"))
     host.request("model.complete", {
-        task: "You are AgentMail in a ReAct loop. The language field is the system language. Write answer in that language. If the person's own later messages ask for a different language, write answer in that language instead. Write any email subject and body you put in subject and body in the same language as answer. Current screen: the value of screen. You can open the mail list, one message, the reply composer, or the new-message composer. tools is a comma-separated list run in order, or empty. Tools: read_message, read_mailbox, read_range, summarize, translate, show_original, find_event, add_event, open_reply, open_compose, write_reply, write_mail, open_mail, classify, classify_more. classify sorts the latest 100 messages into the account's existing folders, and only when the user asks. classify_more does the next 100, and only when the user asks for more. Never classify on your own. find_event reads a schedule from the open mail. add_event writes the schedule already in the pending field, and only after the user has agreed in their own later message. When the question is Recognize, call summarize then find_event before Finish. If a schedule was found, the answer must show its title, start, end, and location, then ask whether to add it. Do not call add_event during Recognize. When the user agrees, call add_event. History is the earlier chat. Use it, and use pending, so you know which schedule they mean. For write_reply and write_mail put the draft in to, subject, and body. For open_mail put words from the subject or sender in query. since, until, and span are only for read_range. After you see an observation, you may return another list. Set stop to Finish or 结束 only when answer is the reply for the user. Do not put Finish inside answer."
+        task: "You are AgentMail in a ReAct loop. The language field is the system language. Write answer in that language. If the person's own later messages ask for a different language, write answer in that language instead. Write any email subject and body you put in subject and body in the same language as answer. Current screen: the value of screen. You can open the mail list, one message, the reply composer, or the new-message composer. tools is a comma-separated list run in order, or empty. Tools: read_message, read_mailbox, read_range, summarize, translate, show_original, find_event, add_event, open_reply, open_compose, write_reply, write_mail, open_mail, classify, classify_more. classify sorts the latest 100 messages into the account's existing folders, and only when the user asks. classify_more does the next 100, and only when the user asks for more. Never classify on your own. find_event identifies a new, rescheduled, or cancelled activity in the open mail. add_event starts a system-calendar lookup only after the user agrees in a later message; it may create, prepare an update, prepare a deletion, or ask the user to choose among conflicts. Every duplicate, update, deletion, or unmatched replacement needs another explicit answer from the user before the native host review opens. When the question is Recognize, call summarize then find_event before Finish. Show the event fields and ask whether to check the system calendar. For a cancellation, ask whether to find the cancelled event; for a reschedule, show old and new times and ask whether to find the old event. Do not call add_event during Recognize. When the user agrees, call add_event. Never claim an event was created, updated, or deleted until the tool reports success. History is the earlier chat. Use it, and use pending, so you know which schedule they mean. For write_reply and write_mail put the draft in to, subject, and body. For open_mail put words from the subject or sender in query. since, until, and span are only for read_range. After you see an observation, you may return another list. Set stop to Finish or 结束 only when answer is the reply for the user. Do not put Finish inside answer."
         input: {question: pending_q screen: screen_now() open: open_hint() language: sys_lang history: clip(history_text(), 4000) pending: event_brief() observations: clip(react_trace, 6000) step: react_step}
         schema: plan_schema()
         class: "fast"
@@ -2015,7 +2293,7 @@ fn react_next(){
             if r.data.output.answer != nil { answer = r.data.output.answer }
         }
         if is_stop(stop) {
-            if pending_q == "Recognize" && react_step < 4 && react_trace.search("Schedule found") < 0 && react_trace.search("No schedule") < 0 {
+            if pending_q == "Recognize" && react_step < 4 && react_trace.search("Schedule found") < 0 && react_trace.search("Reschedule found") < 0 && react_trace.search("Cancellation found") < 0 && react_trace.search("No schedule") < 0 {
                 observe("Recognize is not finished. Call summarize, then find_event. Do not add the event yet.")
                 return
             }
@@ -2093,13 +2371,14 @@ fn tool_summarize(){
     })
 }
 fn tool_find_event(){
-    if reading == nil { pending_event = nil; finish_tool("No schedule. No message is open."); return }
+    if reading == nil { clear_calendar_decision(); finish_tool("No schedule. No message is open."); return }
     if react_step >= 10 { finish_tool("Step limit reached before the schedule check."); return }
+    clear_calendar_decision()
     react_step = react_step + 1
     ui.agent_note.set_text(say("thinking"))
     let key = mail_key()
     host.request("model.complete", {
-        task: "Decide whether this email contains one calendar event, such as a meeting, appointment, delivery window, flight, reservation, or a deadline that has a date or a time. If it does, set found to yes and copy the title and location from the mail. Write start and end strictly as YYYY-MM-DDTHH:mm local wall times, with no timezone name or abbreviation in those fields. Put the IANA timezone, such as Asia/Hong_Kong or Asia/Shanghai, only in timezone. Also set start_ms and end_ms to Unix milliseconds for those times. If the end is missing, set end_ms to one hour after start_ms and write that derived local time in end. If there is no schedule, set found to no, start_ms and end_ms to 0, and leave the other fields empty. Do not invent a start time or a place."
+        task: "Identify one calendar activity and the email's intent. Use intent create for a new meeting, appointment, delivery window, flight, reservation, class, or dated deadline; reschedule only when the email explicitly changes or postpones an existing activity; cancel only when it explicitly cancels an existing activity; otherwise none. Keep title as the stable activity name and remove words such as updated, rescheduled, changed, cancelled, 改期, 变更, or 取消. For create and reschedule, write the new start and end strictly as YYYY-MM-DDTHH:mm local wall times and set their Unix milliseconds. If the new end is missing, derive one hour. For reschedule, put an explicitly stated old time in previous_start/previous_end and milliseconds; otherwise leave previous fields empty and zero. For cancel, put an explicitly stated cancelled time in start/end and milliseconds, but leave them empty and zero if absent. Put only the IANA zone in timezone. Never invent a date, time, place, old schedule, or cancellation. found is yes for a sufficiently identifiable create, reschedule, or cancel activity; otherwise no."
         input: {subject: reading.subject from: reading.sender body: clip(strip_tags(reading.body), 6000)}
         schema: event_schema()
         class: "fast"
@@ -2107,30 +2386,46 @@ fn tool_find_event(){
     }, fn(r){
         if !r.is_ok { pending_event = nil; finish_tool(local_error(r.error)); return }
         let found = "no"
+        let intent = "none"
         let title = ""
         let start = ""
         let end = ""
         let location = ""
         let start_ms = 0
         let end_ms = 0
+        let previous_start = ""
+        let previous_end = ""
+        let previous_start_ms = 0
+        let previous_end_ms = 0
         let timezone = "Asia/Shanghai"
         if r.data != nil && r.data.output != nil {
             if r.data.output.found != nil { found = r.data.output.found }
+            if r.data.output.intent != nil { intent = r.data.output.intent }
             if r.data.output.title != nil { title = r.data.output.title }
             if r.data.output.start != nil { start = r.data.output.start }
             if r.data.output.end != nil { end = r.data.output.end }
             if r.data.output.location != nil { location = r.data.output.location }
             if r.data.output.start_ms != nil { start_ms = r.data.output.start_ms }
             if r.data.output.end_ms != nil { end_ms = r.data.output.end_ms }
+            if r.data.output.previous_start != nil { previous_start = r.data.output.previous_start }
+            if r.data.output.previous_end != nil { previous_end = r.data.output.previous_end }
+            if r.data.output.previous_start_ms != nil { previous_start_ms = r.data.output.previous_start_ms }
+            if r.data.output.previous_end_ms != nil { previous_end_ms = r.data.output.previous_end_ms }
             if r.data.output.timezone != nil && r.data.output.timezone != "" { timezone = r.data.output.timezone }
         }
-        if found != "yes" || title == "" || start == "" {
-            pending_event = nil
+        if found != "yes" || intent == "none" || title == "" || (intent != "cancel" && start == "") {
+            clear_calendar_decision()
             finish_tool("No schedule in this mail.")
             return
         }
-        pending_event = {title: title start: start end: end location: location key: key start_ms: start_ms end_ms: end_ms timezone: timezone}
-        finish_tool("Schedule found. Title: " + title + ". Start: " + start + ". End: " + end + ". Location: " + location + ". Show these fields and ask whether to add the event. Do not add it yet.")
+        pending_event = {intent: intent title: title start: start end: end location: location key: key start_ms: start_ms end_ms: end_ms previous_start: previous_start previous_end: previous_end previous_start_ms: previous_start_ms previous_end_ms: previous_end_ms timezone: timezone}
+        if intent == "cancel" {
+            finish_tool("Cancellation found. Title: " + title + ". Cancelled time: " + start + ". Ask whether to search the system calendar for the specific event. Do not delete anything yet.")
+        } else if intent == "reschedule" {
+            finish_tool("Reschedule found. Title: " + title + ". Old time: " + previous_start + ". New start: " + start + ". New end: " + end + ". Ask whether to search the system calendar for the old event. Do not update anything yet.")
+        } else {
+            finish_tool("Schedule found. Title: " + title + ". Start: " + start + ". End: " + end + ". Location: " + location + ". Ask whether to check the system calendar and add it. Do not add it yet.")
+        }
     })
 }
 fn tool_add_event(){
@@ -2436,13 +2731,33 @@ fn ask_agent(text){
     chat_log.push({role: "user" text: q})
     paint_chat()
     show_agent()
+    if pending_calendar_stage != "" {
+        if declines(q) {
+            clear_calendar_decision()
+            finish_turn(say("calendar_change_cancelled"))
+            return
+        }
+        if pending_calendar_stage == "choose" {
+            agent_busy = true
+            choose_calendar_candidate(q)
+            return
+        }
+        if confirms_calendar_action(q) {
+            execute_calendar_decision()
+            return
+        }
+        finish_turn(calendar_confirmation_text())
+        return
+    }
     if pending_event != nil && agrees(q) {
         begin_calendar_event()
         return
     }
     if pending_event != nil && declines(q) {
-        pending_event = nil
-        finish_turn(say("not_added"))
+        let intent = pending_event.intent
+        clear_calendar_decision()
+        if intent == "cancel" || intent == "reschedule" { finish_turn(say("calendar_change_cancelled")) }
+        else { finish_turn(say("not_added")) }
         return
     }
     agent_busy = true

@@ -15,13 +15,16 @@
       "device_calendar.calendars.list": 1,
       "device_calendar.calendars.select": 1,
       "device_calendar.events.create": 1,
+      "device_calendar.events.delete": 1,
+      "device_calendar.events.list": 1,
+      "device_calendar.events.update": 1,
       "device_calendar.permission.request": 1,
       "device_calendar.permission.status": 1
     }
   },
   "id": "agent-mail",
   "integrity": {
-    "bundle_blake3": "7fdd08903bbc5fb2f8988e2a7bd034d951c24f741832657075a26ff4d656f47b"
+    "bundle_blake3": "86395a31f46bf093dc2026a6e1fc06f2678c774f470d27762aa6085eea964443"
   },
   "name": "AgentMail",
   "network": {
