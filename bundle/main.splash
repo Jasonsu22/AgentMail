@@ -3237,7 +3237,7 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
             draft_ask := GestureView{visible: false width: Fill height: Fill align: Align{x: 0.5 y: 0.5} on_tap: |x, y| { }
                 draw_bg.color: #x66000000
                 GestureView{width: 340 height: Fit on_tap: |x, y| { }
-                    SolidView{width: Fill height: Fit flow: Down padding: 20 spacing: 12 draw_bg.color: #xffffff
+                    SolidView{width: Fill height: Fit flow: Down padding: 20 spacing: 12 draw_bg +: {color: #xffffff border_radius: 16.0}
                         draft_title := Label{text: "" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 18}}
                         draft_body := Label{width: Fill text: "" draw_text.color: secondary draw_text.text_style.font_size: 14}
                         View{width: Fill height: Fit flow: Right
@@ -3254,7 +3254,7 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
             confirm := GestureView{visible: false width: Fill height: Fill align: Align{x: 0.5 y: 0.5} on_tap: |x, y| cancel_remove()
                 draw_bg.color: #x66000000
                 GestureView{width: 320 height: Fit on_tap: |x, y| { }
-                    SolidView{width: Fill height: Fit flow: Down padding: 20 spacing: 12 draw_bg.color: #xffffff
+                    SolidView{width: Fill height: Fit flow: Down padding: 20 spacing: 12 draw_bg +: {color: #xffffff border_radius: 16.0}
                         confirm_title := Label{text: "移除这个账号？" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 18}}
                         confirm_name := Label{width: Fill text: "" draw_text.color: secondary draw_text.text_style.font_size: 14}
                         View{width: Fill height: Fit flow: Right
