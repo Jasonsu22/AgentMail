@@ -69,6 +69,10 @@ let arg_query = ""
 let arg_since = ""
 let arg_until = ""
 let arg_span = ""
+let arg_todo_id = 0
+let arg_todo_title = ""
+let arg_todo_deadline = ""
+let arg_todo_deadline_mode = "keep"
 let in_chain = false
 let react_step = 0
 let react_trace = ""
@@ -1251,6 +1255,10 @@ fn open_action_source(id){
     let chosen = nil
     for item in action_items { if item.id == id { chosen = item } }
     if chosen == nil { return }
+    if chosen.account == "" || chosen.message == "" {
+        ui.todos_hint.set_text(say("no_message"))
+        return
+    }
     let target_account = nil
     for a in accounts { if a.id == chosen.account { target_account = a } }
     if target_account == nil {
@@ -1344,7 +1352,7 @@ fn refresh_provider(){
     })
 }
 fn plan_schema(){
-    return {type: "object" required: ["stop" "tools" "since" "until" "span" "to" "subject" "body" "query" "answer"] additionalProperties: false
+    return {type: "object" required: ["stop" "tools" "since" "until" "span" "to" "subject" "body" "query" "todo_id" "todo_title" "todo_deadline" "todo_deadline_mode" "answer"] additionalProperties: false
         properties: {
             stop: {type: "string" enum: ["continue" "Finish" "结束"]}
             tools: {type: "string" maxLength: 240}
@@ -1355,6 +1363,10 @@ fn plan_schema(){
             subject: {type: "string" maxLength: 300}
             body: {type: "string" maxLength: 4000}
             query: {type: "string" maxLength: 120}
+            todo_id: {type: "integer"}
+            todo_title: {type: "string" maxLength: 180}
+            todo_deadline: {type: "string" maxLength: 100}
+            todo_deadline_mode: {type: "string" enum: ["keep" "set" "clear"]}
             answer: {type: "string" maxLength: 4000}
         }}
 }
@@ -1553,6 +1565,142 @@ fn set_action_status(id, state){
     ui.action_rows.render()
     ui.todo_rows.render()
     paint_mail()
+}
+fn todo_line(item){
+    let text = "#" + item.id + " [" + item.status + "] " + item.title
+    if item.deadline != "" { text = text + " — deadline: " + item.deadline }
+    return text
+}
+fn tool_list_todos(){
+    let text = "To-dos (including suggested items):"
+    let n = 0
+    for item in action_items {
+        if item.status != "ignored" {
+            text = text + "\n" + todo_line(item)
+            n = n + 1
+        }
+    }
+    if n == 0 { text = "There are no to-dos or suggestions." }
+    finish_tool(text)
+}
+fn save_todo_changes(){
+    save_action_items()
+    refresh_todo_button()
+    ui.action_rows.render()
+    ui.todo_rows.render()
+    paint_mail()
+}
+fn tool_add_todo(){
+    let id = arg_todo_id
+    if id > 0 {
+        for item in action_items {
+            if item.id == id {
+                if item.status == "suggested" {
+                    item.status = "todo"
+                    save_todo_changes()
+                    finish_tool("Added suggested item " + todo_line(item) + " to the to-do list.")
+                    return
+                }
+                if item.status == "todo" { finish_tool("That item is already in the to-do list: " + todo_line(item)); return }
+                if item.status == "done" { finish_tool("That item is completed. Use reopen_todo if the user wants it active again: " + todo_line(item)); return }
+                finish_tool("That item is ignored and cannot be added until it is created again.")
+                return
+            }
+        }
+        finish_tool("No to-do has id #" + id + ". Call list_todos before changing an existing item.")
+        return
+    }
+    let title = arg_todo_title.trim()
+    if title == "" { finish_tool("Refused: a new to-do needs a title in todo_title."); return }
+    let deadline = arg_todo_deadline.trim()
+    let subject = "Manual to-do"
+    let sender = "AgentMail"
+    let message = ""
+    if reading != nil {
+        subject = reading.subject
+        sender = reading.sender
+        message = reading.id
+    }
+    let account_id = ""
+    if account != nil { account_id = account.id }
+    let item = {id: next_action_id key: "manual:" + next_action_id title: clip(title, 180) deadline: clip(deadline, 100) evidence: "Created from the user's request in AgentMail." status: "todo" account: account_id folder: folder.id message: message subject: subject sender: sender}
+    action_items.push(item)
+    next_action_id = next_action_id + 1
+    save_todo_changes()
+    finish_tool("Created " + todo_line(item) + ".")
+}
+fn tool_update_todo(){
+    let id = arg_todo_id
+    if id <= 0 { finish_tool("Refused: update_todo needs the exact todo_id. Call list_todos if the item is not clear."); return }
+    let title = arg_todo_title.trim()
+    let deadline = arg_todo_deadline.trim()
+    if arg_todo_deadline_mode == "set" && deadline == "" { finish_tool("Refused: a deadline set needs a non-empty todo_deadline. Use clear to remove it."); return }
+    let found = false
+    let changed = false
+    let shown = ""
+    for item in action_items {
+        if item.id == id && item.status != "ignored" {
+            found = true
+            if title != "" && title != item.title { item.title = clip(title, 180); changed = true }
+            if arg_todo_deadline_mode == "set" && deadline != item.deadline { item.deadline = clip(deadline, 100); changed = true }
+            if arg_todo_deadline_mode == "clear" && item.deadline != "" { item.deadline = ""; changed = true }
+            shown = todo_line(item)
+        }
+    }
+    if !found { finish_tool("No active to-do has id #" + id + ". Call list_todos before changing an existing item."); return }
+    if !changed { finish_tool("No change was made to " + shown + "."); return }
+    save_todo_changes()
+    finish_tool("Updated " + shown + ".")
+}
+fn tool_complete_todo(){
+    let id = arg_todo_id
+    if id <= 0 { finish_tool("Refused: complete_todo needs the exact todo_id. Call list_todos if the item is not clear."); return }
+    for item in action_items {
+        if item.id == id {
+            if item.status == "todo" {
+                item.status = "done"
+                save_todo_changes()
+                finish_tool("Completed " + todo_line(item) + ".")
+                return
+            }
+            if item.status == "done" { finish_tool("That item is already completed: " + todo_line(item)); return }
+            finish_tool("Only an active to-do can be completed. Use add_todo first for a suggestion.")
+            return
+        }
+    }
+    finish_tool("No to-do has id #" + id + ". Call list_todos before changing an existing item.")
+}
+fn tool_reopen_todo(){
+    let id = arg_todo_id
+    if id <= 0 { finish_tool("Refused: reopen_todo needs the exact todo_id. Call list_todos if the item is not clear."); return }
+    for item in action_items {
+        if item.id == id {
+            if item.status == "done" {
+                item.status = "todo"
+                save_todo_changes()
+                finish_tool("Reopened " + todo_line(item) + ".")
+                return
+            }
+            if item.status == "todo" { finish_tool("That item is already active: " + todo_line(item)); return }
+            finish_tool("Only a completed to-do can be reopened.")
+            return
+        }
+    }
+    finish_tool("No to-do has id #" + id + ". Call list_todos before changing an existing item.")
+}
+fn tool_delete_todo(){
+    let id = arg_todo_id
+    if id <= 0 { finish_tool("Refused: delete_todo needs the exact todo_id. Call list_todos if the item is not clear."); return }
+    let kept = []
+    let removed = ""
+    for item in action_items {
+        if item.id == id { removed = todo_line(item) }
+        else { kept.push(item) }
+    }
+    if removed == "" { finish_tool("No to-do has id #" + id + ". Call list_todos before changing an existing item."); return }
+    action_items = kept
+    save_todo_changes()
+    finish_tool("Deleted " + removed + ".")
 }
 fn load_tools(){
     if fs.exists("lang.txt") {
@@ -2202,7 +2350,7 @@ fn react_next(){
     react_step = react_step + 1
     ui.agent_note.set_text(say("thinking"))
     host.request("model.complete", {
-        task: "You are AgentMail in a ReAct loop. The language field is the system language. Write answer in that language. If the person's own later messages ask for a different language, write answer in that language instead. Write any email subject and body you put in subject and body in the same language as answer. Current screen: the value of screen. You can open the mail list, one message, the reply composer, or the new-message composer. tools is a comma-separated list run in order, or empty. Tools: read_message, read_mailbox, read_range, summarize, translate, show_original, find_event, add_event, open_reply, open_compose, write_reply, write_mail, open_mail, classify, classify_more. summarize also extracts unfinished action items assigned to the user and stores them beside the open email; mention those action items in the final answer when present. classify sorts the latest 100 messages into the account's existing folders, and only when the user asks. classify_more does the next 100, and only when the user asks for more. Never classify on your own. find_event reads a schedule from the open mail. add_event writes the schedule already in the pending field, and only after the user has agreed in their own later message. When the question is Recognize, call summarize then find_event before Finish. If a schedule was found, the answer must show its title, start, end, and location, then ask whether to add it. Do not call add_event during Recognize. When the user agrees, call add_event. History is the earlier chat. Use it, and use pending, so you know which schedule they mean. For write_reply and write_mail put the draft in to, subject, and body. For open_mail put words from the subject or sender in query. since, until, and span are only for read_range. After you see an observation, you may return another list. Set stop to Finish or 结束 only when answer is the reply for the user. Do not put Finish inside answer."
+        task: "You are AgentMail in a ReAct loop. The language field is the system language. Write answer in that language. If the person's own later messages ask for a different language, write answer in that language instead. Write any email subject and body you put in subject and body in the same language as answer. Current screen: the value of screen. You can open the mail list, one message, the reply composer, or the new-message composer. tools is a comma-separated list run in order, or empty. Tools: read_message, read_mailbox, read_range, summarize, translate, show_original, find_event, add_event, list_todos, add_todo, update_todo, complete_todo, reopen_todo, delete_todo, open_reply, open_compose, write_reply, write_mail, open_mail, classify, classify_more. summarize also extracts unfinished action items assigned to the user and stores them beside the open email; mention those action items, including their ids, in the final answer when present. For a user request to remember, add, modify, complete, reopen, remove, or delete a personal to-do, use the to-do tools. Do not say AgentMail has no to-do feature and do not substitute a reminder email or calendar event. list_todos returns the ids and states of all active suggestions and to-dos. For a new to-do, call add_todo with todo_id 0 and a concise todo_title; put any user-stated deadline in todo_deadline. For a summary suggestion whose id is known, call add_todo with that todo_id to track it. For update_todo, complete_todo, reopen_todo, and delete_todo, use the exact todo_id; call list_todos first when the target is ambiguous. update_todo changes a non-empty todo_title and changes deadline only when todo_deadline_mode is set or clear; use keep otherwise. The user asking in this turn authorizes local to-do changes. classify sorts the latest 100 messages into the account's existing folders, and only when the user asks. classify_more does the next 100, and only when the user asks for more. Never classify on your own. find_event reads a schedule from the open mail. add_event writes the schedule already in the pending field, and only after the user has agreed in their own later message. When the question is Recognize, call summarize then find_event before Finish. If a schedule was found, the answer must show its title, start, end, and location, then ask whether to add it. Do not call add_event during Recognize. When the user agrees, call add_event. History is the earlier chat. Use it, and use pending, so you know which schedule they mean. For write_reply and write_mail put the draft in to, subject, and body. For open_mail put words from the subject or sender in query. since, until, and span are only for read_range. After you see an observation, you may return another list. Set stop to Finish or 结束 only when answer is the reply for the user. Do not put Finish inside answer."
         input: {question: pending_q screen: screen_now() open: open_hint() language: sys_lang history: clip(history_text(), 4000) pending: event_brief() observations: clip(react_trace, 6000) step: react_step}
         schema: plan_schema()
         class: "fast"
@@ -2222,6 +2370,10 @@ fn react_next(){
         arg_since = ""
         arg_until = ""
         arg_span = ""
+        arg_todo_id = 0
+        arg_todo_title = ""
+        arg_todo_deadline = ""
+        arg_todo_deadline_mode = "keep"
         if r.data != nil && r.data.output != nil {
             if r.data.output.stop != nil { stop = r.data.output.stop }
             if r.data.output.tools != nil { tools = r.data.output.tools }
@@ -2235,6 +2387,10 @@ fn react_next(){
             if r.data.output.subject != nil { arg_subject = r.data.output.subject }
             if r.data.output.body != nil { arg_body = r.data.output.body }
             if r.data.output.query != nil { arg_query = r.data.output.query }
+            if r.data.output.todo_id != nil { arg_todo_id = r.data.output.todo_id }
+            if r.data.output.todo_title != nil { arg_todo_title = r.data.output.todo_title }
+            if r.data.output.todo_deadline != nil { arg_todo_deadline = r.data.output.todo_deadline }
+            if r.data.output.todo_deadline_mode != nil { arg_todo_deadline_mode = r.data.output.todo_deadline_mode }
             if r.data.output.answer != nil { answer = r.data.output.answer }
         }
         if is_stop(stop) {
@@ -2298,7 +2454,7 @@ fn summary_action_observation(key, summary){
     for item in action_items {
         if item.key == key && item.status != "ignored" {
             n = n + 1
-            text = text + "\nAction for the user: " + item.title
+            text = text + "\nAction for the user (#" + item.id + "): " + item.title
             if item.deadline != "" { text = text + ". Deadline stated in the email: " + item.deadline }
         }
     }
@@ -2612,6 +2768,12 @@ fn dispatch(tool, since, until, span){
     if tool == "summarize" { tool_summarize(); return }
     if tool == "find_event" { tool_find_event(); return }
     if tool == "add_event" { tool_add_event(); return }
+    if tool == "list_todos" { tool_list_todos(); return }
+    if tool == "add_todo" { tool_add_todo(); return }
+    if tool == "update_todo" { tool_update_todo(); return }
+    if tool == "complete_todo" { tool_complete_todo(); return }
+    if tool == "reopen_todo" { tool_reopen_todo(); return }
+    if tool == "delete_todo" { tool_delete_todo(); return }
     if tool == "translate" { tool_translate(); return }
     if tool == "show_original" { tool_show_original(); return }
     if tool == "read_mailbox" { tool_read_mailbox(); return }
@@ -2879,7 +3041,9 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
                                 Label{width: Fill text: item.sender + " · " + item.subject max_lines: 2 draw_text.color: secondary draw_text.text_style.font_size: 12}
                                 Label{width: Fill text: say("evidence") + item.evidence max_lines: 3 draw_text.color: ink draw_text.text_style.font_size: 12}
                                 View{width: Fill height: Fit flow: Right spacing: 4
-                                    Bar{text: say("source") on_click: || open_action_source(action_id)}
+                                    if item.account != "" && item.message != "" {
+                                        Bar{text: say("source") on_click: || open_action_source(action_id)}
+                                    }
                                     if item.status == "todo" {
                                         Bar{text: say("complete") on_click: || set_action_status(action_id, "done")}
                                         Bar{text: say("ignore") on_click: || set_action_status(action_id, "ignored")}

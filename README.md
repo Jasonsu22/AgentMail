@@ -9,7 +9,7 @@ your password.
 ## Features
 
 - **Read & manage mail** — inbox, folders, compose, reply, send
-- **AI summaries and to-dos** — on request, extract only user-owned action items backed by an exact quote; track, complete, reopen, or ignore them in AgentMail
+- **AI summaries and to-dos** — on request, extract only user-owned action items backed by an exact quote; the assistant can also add, list, update, complete, reopen, or delete local to-dos on your request
 - **Host-owned credentials** — sign in on the device's own sheet; passwords stay in the platform keychain
 - **Offline-first UI** — the assistant is optional; every screen works without it
 
