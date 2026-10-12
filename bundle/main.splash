@@ -91,6 +91,9 @@ let saved_subject = {}
 let saved_trans_lang = {}
 let sum_keys = []
 let trans_keys = []
+let action_items = []
+let action_checked_keys = []
+let next_action_id = 1
 
 fn status(text){ ui.status.set_text(text) }
 fn pane(name){
@@ -103,6 +106,7 @@ fn show_reader(){
     ui.composer.set_visible(false)
     ui.settings_pane.set_visible(false)
     ui.confirm.set_visible(false)
+    ui.todos_pane.set_visible(false)
     paint_mail()
 }
 fn show_composer(){
@@ -111,6 +115,7 @@ fn show_composer(){
     ui.composer.set_visible(true)
     ui.settings_pane.set_visible(false)
     ui.confirm.set_visible(false)
+    ui.todos_pane.set_visible(false)
 }
 fn close_detail(){
     commit_rename()
@@ -122,6 +127,7 @@ fn close_detail(){
     ui.composer.set_visible(false)
     ui.settings_pane.set_visible(false)
     ui.confirm.set_visible(false)
+    ui.todos_pane.set_visible(false)
 }
 fn toggle_rail(){
     rail_open = !rail_open
@@ -141,6 +147,7 @@ fn display_name(a){
 fn load_prefs(){
     load_chats()
     load_tools()
+    load_action_items()
     load_device_calendar_handles()
     load_classes()
     load_events()
@@ -309,7 +316,23 @@ fn say(id){
     if id == "not_done" { return at5(i, "This request was not finished.", "这次请求没有完成。", "Cette demande n'a pas abouti.", "この依頼は完了しませんでした。", "Этот запрос не выполнен.") }
     if id == "translating" { return at5(i, "Translating…", "正在翻译…", "Traduction…", "翻訳中…", "Перевод…") }
     if id == "show_original" { return at5(i, "Show original", "显示原文", "Voir l'original", "原文を表示", "Показать оригинал") }
-    if id == "recognize" { return at5(i, "Summarize", "总结", "Résumer", "要約", "Кратко") }
+    if id == "recognize" { return at5(i, "AI Summary", "AI 总结", "Résumé IA", "AI 要約", "ИИ-итог") }
+    if id == "todos" { return at5(i, "To-dos", "待办", "Tâches", "タスク", "Задачи") }
+    if id == "todo_title" { return at5(i, "AgentMail To-dos", "AgentMail 待办", "Tâches AgentMail", "AgentMail タスク", "Задачи AgentMail") }
+    if id == "todo_hint" { return at5(i, "Action items you chose to track from email.", "你从邮件中选择跟进的事项。", "Actions d'e-mails que vous avez choisi de suivre.", "メールから追跡することにした項目です。", "Дела из писем, которые вы решили отслеживать.") }
+    if id == "todo_empty" { return at5(i, "No tracked to-dos yet.", "还没有已加入的待办。", "Aucune tâche suivie.", "追跡中のタスクはありません。", "Пока нет отслеживаемых задач.") }
+    if id == "actions" { return at5(i, "Action items for you", "需要你处理", "Actions pour vous", "あなたのタスク", "Ваши задачи") }
+    if id == "no_actions" { return at5(i, "No action item assigned to you was found.", "没有识别到需要你处理的事项。", "Aucune action qui vous est attribuée n'a été trouvée.", "あなたに割り当てられたタスクは見つかりませんでした。", "Задач, назначенных вам, не найдено.") }
+    if id == "add_todo" { return at5(i, "Add to to-dos", "加入待办", "Ajouter", "タスクに追加", "Добавить") }
+    if id == "complete" { return at5(i, "Complete", "完成", "Terminer", "完了", "Готово") }
+    if id == "reopen" { return at5(i, "Reopen", "重新打开", "Rouvrir", "再開", "Вернуть") }
+    if id == "ignore" { return at5(i, "Ignore", "忽略", "Ignorer", "無視", "Игнорировать") }
+    if id == "source" { return at5(i, "Open source", "打开原邮件", "Ouvrir l'e-mail", "元メールを開く", "Открыть письмо") }
+    if id == "evidence" { return at5(i, "From the email: ", "原文依据：", "Extrait : ", "原文：", "Из письма: ") }
+    if id == "due" { return at5(i, "Due: ", "截止：", "Échéance : ", "期限：", "Срок: ") }
+    if id == "no_due" { return at5(i, "No stated deadline", "未说明截止时间", "Aucune échéance indiquée", "期限の記載なし", "Срок не указан") }
+    if id == "todo_added" { return at5(i, "Tracked", "已加入待办", "Suivie", "追跡中", "Отслеживается") }
+    if id == "todo_done" { return at5(i, "Completed", "已完成", "Terminée", "完了", "Выполнено") }
     if id == "reply" { return at5(i, "Reply", "回复", "Répondre", "返信", "Ответить") }
     if id == "cancel" { return at5(i, "Cancel", "取消", "Annuler", "キャンセル", "Отмена") }
     if id == "draft" { return at5(i, "Help me write", "帮我写", "Écris pour moi", "書いて", "Напиши") }
@@ -1210,7 +1233,61 @@ fn show_settings(){
     ui.composer.set_visible(false)
     ui.settings_pane.set_visible(true)
     ui.confirm.set_visible(false)
+    ui.todos_pane.set_visible(false)
     show_tab("account")
+}
+fn show_todos(){
+    commit_rename()
+    ui.list_pane.set_visible(false)
+    ui.reader.set_visible(false)
+    ui.composer.set_visible(false)
+    ui.settings_pane.set_visible(false)
+    ui.confirm.set_visible(false)
+    ui.todos_pane.set_visible(true)
+    ui.todos_hint.set_text(say("todo_hint"))
+    ui.todo_rows.render()
+}
+fn open_action_source(id){
+    let chosen = nil
+    for item in action_items { if item.id == id { chosen = item } }
+    if chosen == nil { return }
+    let target_account = nil
+    for a in accounts { if a.id == chosen.account { target_account = a } }
+    if target_account == nil {
+        ui.todos_hint.set_text(say("no_message"))
+        return
+    }
+    account = target_account
+    let target_folder = {id: chosen.folder name: chosen.folder role: ""}
+    let known = folders_by[chosen.account]
+    if known != nil {
+        for f in known { if f.id == chosen.folder { target_folder = f } }
+    }
+    folder = target_folder
+    open_id = chosen.message
+    host.request("mail.message", {account: chosen.account folder: chosen.folder message: chosen.message}, fn(r){
+        if !r.is_ok {
+            ui.todos_hint.set_text(local_error(r.error))
+            return
+        }
+        reading = r.data
+        ui.r_subject.set_text(r.data.subject)
+        ui.r_sender.set_text(r.data.sender + "  <" + r.data.address + ">")
+        ui.r_time.set_text(r.data.time)
+        let formatted = r.data.html != ""
+        ui.r_html.set_visible(formatted)
+        ui.r_body.set_visible(!formatted)
+        if formatted { ui.r_html.set_text(r.data.html) } else { ui.r_body.set_text(r.data.body) }
+        let attachments = ""
+        for a in r.data.attachments {
+            if attachments != "" { attachments = attachments + ", " }
+            attachments = attachments + a.filename + " (" + kb(a.size) + ")"
+        }
+        ui.r_attachments.set_visible(attachments != "")
+        ui.r_attachments.set_text(say("attachments") + attachments)
+        show_heading()
+        show_reader()
+    })
 }
 fn open_settings(){
     commit_rename()
@@ -1302,6 +1379,21 @@ fn translate_schema(){
             text: {type: "string" maxLength: 8000}
         }}
 }
+fn summary_actions_schema(){
+    return {type: "object" required: ["summary" "actions"] additionalProperties: false
+        properties: {
+            summary: {type: "string" minLength: 1 maxLength: 4000}
+            actions: {type: "array" minItems: 0 maxItems: 6 items: {
+                type: "object" required: ["title" "deadline" "evidence" "assignee"] additionalProperties: false
+                properties: {
+                    title: {type: "string" minLength: 1 maxLength: 180}
+                    deadline: {type: "string" maxLength: 100}
+                    evidence: {type: "string" minLength: 1 maxLength: 260}
+                    assignee: {type: "string" enum: ["user" "other" "unclear"]}
+                }
+            }}
+        }}
+}
 fn pack(text){
     if text == nil { return "" }
     let parts = text.split("\n")
@@ -1340,6 +1432,127 @@ fn remember_trans(key, lang, subject, text){
     let found = false
     for k in trans_keys { if k == key { found = true } }
     if !found { trans_keys.push(key) }
+}
+fn action_key_checked(key){
+    for k in action_checked_keys { if k == key { return true } }
+    return false
+}
+fn mark_action_key_checked(key){
+    if action_key_checked(key) { return }
+    action_checked_keys.push(key)
+}
+fn action_status_ok(status){
+    return status == "suggested" || status == "todo" || status == "done" || status == "ignored"
+}
+fn save_action_items(){
+    fs.write("actions.json", {version: 1 next_id: next_action_id checked: action_checked_keys items: action_items}.to_json())
+}
+fn load_action_items(){
+    action_items = []
+    action_checked_keys = []
+    next_action_id = 1
+    if !fs.exists("actions.json") { return }
+    try {
+        let raw = fs.read("actions.json")
+        let data = raw.parse_json()
+        if data == nil || data.version != 1 || data.items == nil || !data.items.is_array() { return }
+        if data.checked != nil && data.checked.is_array() {
+            for key in data.checked {
+                if key != nil && ("" + key) != "" && action_checked_keys.len() < 1000 {
+                    action_checked_keys.push("" + key)
+                }
+            }
+        }
+        for item in data.items {
+            if action_items.len() >= 1000 { break }
+            if item == nil || item.id == nil || item.key == nil || item.title == nil || item.evidence == nil || item.status == nil { continue }
+            let status = "" + item.status
+            if !action_status_ok(status) { continue }
+            let deadline = ""
+            let account_id = ""
+            let folder_id = "INBOX"
+            let message_id = ""
+            let subject = ""
+            let sender = ""
+            if item.deadline != nil { deadline = "" + item.deadline }
+            if item.account != nil { account_id = "" + item.account }
+            if item.folder != nil { folder_id = "" + item.folder }
+            if item.message != nil { message_id = "" + item.message }
+            if item.subject != nil { subject = "" + item.subject }
+            if item.sender != nil { sender = "" + item.sender }
+            action_items.push({id: item.id key: "" + item.key title: "" + item.title deadline: deadline evidence: "" + item.evidence status: status account: account_id folder: folder_id message: message_id subject: subject sender: sender})
+            if item.id >= next_action_id { next_action_id = item.id + 1 }
+        }
+        if data.next_id != nil && data.next_id > next_action_id { next_action_id = data.next_id }
+    } catch {
+        action_items = []
+        action_checked_keys = []
+        next_action_id = 1
+    }
+}
+fn remove_actions_for(key){
+    let kept = []
+    for item in action_items { if item.key != key { kept.push(item) } }
+    action_items = kept
+}
+fn remember_actions(key, items, source, account_id, folder_id, message_id, subject, sender){
+    remove_actions_for(key)
+    mark_action_key_checked(key)
+    for item in items {
+        let title = ("" + item.title).trim()
+        let evidence = ("" + item.evidence).trim()
+        let assignee = "" + item.assignee
+        let deadline = ""
+        if item.deadline != nil { deadline = ("" + item.deadline).trim() }
+        // Only keep tasks assigned to this user and backed by an exact quote
+        // from the open email. This rejects generic notices and model guesses.
+        if assignee == "user" && title != "" && evidence != "" && source.search(evidence) >= 0 {
+            action_items.push({id: next_action_id key: key title: title deadline: deadline evidence: evidence status: "suggested" account: account_id folder: folder_id message: message_id subject: subject sender: sender})
+            next_action_id = next_action_id + 1
+        }
+    }
+}
+fn action_items_for(key){
+    let out = []
+    for item in action_items { if item.key == key { out.push(item) } }
+    return out
+}
+fn visible_action_count(key){
+    let n = 0
+    for item in action_items {
+        if item.key == key && item.status != "ignored" { n = n + 1 }
+    }
+    return n
+}
+fn pending_todo_count(){
+    let n = 0
+    for item in action_items { if item.status == "todo" { n = n + 1 } }
+    return n
+}
+fn tracked_todo_count(){
+    let n = 0
+    for item in action_items { if item.status == "todo" || item.status == "done" { n = n + 1 } }
+    return n
+}
+fn action_state_face(status){
+    if status == "todo" { return say("todo_added") }
+    if status == "done" { return say("todo_done") }
+    return ""
+}
+fn refresh_todo_button(){
+    let label = say("todos")
+    let n = pending_todo_count()
+    if n > 0 { label = label + " (" + n + ")" }
+    ui.btn_todos.set_text(label)
+}
+fn set_action_status(id, state){
+    if !action_status_ok(state) { return }
+    for item in action_items { if item.id == id { item.status = state } }
+    save_action_items()
+    refresh_todo_button()
+    ui.action_rows.render()
+    ui.todo_rows.render()
+    paint_mail()
 }
 fn load_tools(){
     if fs.exists("lang.txt") {
@@ -1402,6 +1615,7 @@ fn apply_chrome(){
     ui.tab_system.set_text(say("system"))
     ui.btn_refresh.set_text(say("refresh"))
     ui.btn_compose.set_text(say("compose"))
+    refresh_todo_button()
     ui.btn_back.set_text(say("back"))
     ui.translate_btn.set_text(say("translate"))
     ui.btn_recognize.set_text(say("recognize"))
@@ -1410,6 +1624,10 @@ fn apply_chrome(){
     ui.btn_draft.set_text(say("draft"))
     ui.btn_send.set_text(say("send"))
     ui.btn_settings_back.set_text(say("back"))
+    ui.btn_todos_back.set_text(say("back"))
+    ui.todos_title.set_text(say("todo_title"))
+    ui.todos_hint.set_text(say("todo_hint"))
+    ui.action_title.set_text(say("actions"))
     ui.cap_to.set_text(say("to"))
     ui.cap_subject.set_text(say("subject"))
     ui.cap_body.set_text(say("message"))
@@ -1430,6 +1648,8 @@ fn apply_chrome(){
     ui.btn_draft_send.set_text(say("send"))
     ui.cap_lang.set_text(say("lang_name"))
     ui.rows.render()
+    ui.action_rows.render()
+    ui.todo_rows.render()
     ui.settings_accounts.render()
     ui.rail_slot.render()
     show_heading()
@@ -1710,6 +1930,9 @@ fn paint_mail(){
     ui.summary_rule.set_visible(has)
     ui.r_summary.set_visible(has)
     if has { ui.r_summary.set_text(sum) }
+    let checked = action_key_checked(key)
+    ui.action_panel.set_visible(checked)
+    if checked { ui.action_rows.render() }
     refresh_translate_btn()
 }
 fn refresh_translate_btn(){
@@ -1979,7 +2202,7 @@ fn react_next(){
     react_step = react_step + 1
     ui.agent_note.set_text(say("thinking"))
     host.request("model.complete", {
-        task: "You are AgentMail in a ReAct loop. The language field is the system language. Write answer in that language. If the person's own later messages ask for a different language, write answer in that language instead. Write any email subject and body you put in subject and body in the same language as answer. Current screen: the value of screen. You can open the mail list, one message, the reply composer, or the new-message composer. tools is a comma-separated list run in order, or empty. Tools: read_message, read_mailbox, read_range, summarize, translate, show_original, find_event, add_event, open_reply, open_compose, write_reply, write_mail, open_mail, classify, classify_more. classify sorts the latest 100 messages into the account's existing folders, and only when the user asks. classify_more does the next 100, and only when the user asks for more. Never classify on your own. find_event reads a schedule from the open mail. add_event writes the schedule already in the pending field, and only after the user has agreed in their own later message. When the question is Recognize, call summarize then find_event before Finish. If a schedule was found, the answer must show its title, start, end, and location, then ask whether to add it. Do not call add_event during Recognize. When the user agrees, call add_event. History is the earlier chat. Use it, and use pending, so you know which schedule they mean. For write_reply and write_mail put the draft in to, subject, and body. For open_mail put words from the subject or sender in query. since, until, and span are only for read_range. After you see an observation, you may return another list. Set stop to Finish or 结束 only when answer is the reply for the user. Do not put Finish inside answer."
+        task: "You are AgentMail in a ReAct loop. The language field is the system language. Write answer in that language. If the person's own later messages ask for a different language, write answer in that language instead. Write any email subject and body you put in subject and body in the same language as answer. Current screen: the value of screen. You can open the mail list, one message, the reply composer, or the new-message composer. tools is a comma-separated list run in order, or empty. Tools: read_message, read_mailbox, read_range, summarize, translate, show_original, find_event, add_event, open_reply, open_compose, write_reply, write_mail, open_mail, classify, classify_more. summarize also extracts unfinished action items assigned to the user and stores them beside the open email; mention those action items in the final answer when present. classify sorts the latest 100 messages into the account's existing folders, and only when the user asks. classify_more does the next 100, and only when the user asks for more. Never classify on your own. find_event reads a schedule from the open mail. add_event writes the schedule already in the pending field, and only after the user has agreed in their own later message. When the question is Recognize, call summarize then find_event before Finish. If a schedule was found, the answer must show its title, start, end, and location, then ask whether to add it. Do not call add_event during Recognize. When the user agrees, call add_event. History is the earlier chat. Use it, and use pending, so you know which schedule they mean. For write_reply and write_mail put the draft in to, subject, and body. For open_mail put words from the subject or sender in query. since, until, and span are only for read_range. After you see an observation, you may return another list. Set stop to Finish or 结束 only when answer is the reply for the user. Do not put Finish inside answer."
         input: {question: pending_q screen: screen_now() open: open_hint() language: sys_lang history: clip(history_text(), 4000) pending: event_brief() observations: clip(react_trace, 6000) step: react_step}
         schema: plan_schema()
         class: "fast"
@@ -2069,27 +2292,60 @@ fn tool_show_original(){
     paint_mail()
     finish_tool("The original subject and body are on screen.")
 }
+fn summary_action_observation(key, summary){
+    let text = summary
+    let n = 0
+    for item in action_items {
+        if item.key == key && item.status != "ignored" {
+            n = n + 1
+            text = text + "\nAction for the user: " + item.title
+            if item.deadline != "" { text = text + ". Deadline stated in the email: " + item.deadline }
+        }
+    }
+    if n == 0 { text = text + "\nNo action item assigned to the user was found." }
+    return text
+}
 fn tool_summarize(){
     if reading == nil { finish_tool("No message is open, so it was not summarized."); return }
     let key = mail_key()
-    if saved_sum[key] != nil && saved_sum[key] != "" {
+    if saved_sum[key] != nil && saved_sum[key] != "" && action_key_checked(key) {
         paint_mail()
-        finish_tool(saved_sum[key])
+        finish_tool(summary_action_observation(key, saved_sum[key]))
         return
     }
     if react_step >= 10 { finish_tool("Step limit reached before summarize."); return }
     react_step = react_step + 1
     ui.agent_note.set_text(say("thinking"))
+    let source = strip_tags(reading.body)
+    let source_account = account.id
+    let source_address = account.address
+    let source_folder = folder.id
+    let source_message = reading.id
+    let source_subject = reading.subject
+    let source_sender = reading.sender
+    let source_time = reading.time
     host.request("model.complete", {
-        task: "Summarize this email in " + sys_lang + ". Put only the summary in answer. Do not invent facts."
-        input: {subject: reading.subject from: reading.sender body: clip(reading.body, 6000)}
-        schema: answer_schema()
+        task: "Summarize this email in " + sys_lang + " and extract only unfinished action items that the recipient personally needs to do. A notice, advertisement, optional suggestion, action assigned to somebody else, or task already completed is not an action for the recipient. Do not turn every verb into a task. For each real action, write a short title in the requested language. Use deadline only when the email explicitly states one; otherwise leave it empty. Evidence must be one short, exact, contiguous quote copied character-for-character from body. Set assignee to user only when the email explicitly or strongly implies that the recipient is responsible, other when another person is responsible, and unclear when responsibility is uncertain. Do not invent facts."
+        input: {account_email: source_address subject: source_subject from: source_sender date: source_time body: clip(source, 6000)}
+        schema: summary_actions_schema()
         class: "fast"
         allow_urls: true
     }, fn(r){
-        let text = take_answer(r)
-        if r.is_ok { remember_sum(key, text); save_tools(); paint_mail() }
-        finish_tool(text)
+        if !r.is_ok { finish_tool(local_error(r.error)); return }
+        if r.data == nil || r.data.output == nil || r.data.output.summary == nil {
+            finish_tool(say("not_done"))
+            return
+        }
+        let text = "" + r.data.output.summary
+        let actions = []
+        if r.data.output.actions != nil { actions = r.data.output.actions }
+        remember_sum(key, text)
+        remember_actions(key, actions, source, source_account, source_folder, source_message, source_subject, source_sender)
+        save_tools()
+        save_action_items()
+        paint_mail()
+        refresh_todo_button()
+        finish_tool(summary_action_observation(key, text))
     })
 }
 fn tool_find_event(){
@@ -2567,6 +2823,7 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
                 View{width: Fill height: Fit flow: Right align: Align{y: 0.5} padding: Inset{left: 8 right: 8 top: 8}
                     btn_refresh := Bar{text: "刷新" on_click: || sync()}
                     View{width: Fill height: 1}
+                    btn_todos := Bar{text: "待办" on_click: || show_todos()}
                     btn_compose := Bar{text: "写信" on_click: || { compose_kind = "new"; compose("", "", "") }}
                 }
                 View{width: Fill height: Fit flow: Down padding: Inset{left: 16 right: 16 bottom: 6} spacing: 2
@@ -2597,6 +2854,44 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
                     }
                 }}
             }
+            todos_pane := SolidView{visible: false width: Fill height: Fill flow: Down new_batch: true draw_bg.color: #xffffff padding: Inset{left: 16 right: 16 top: 8 bottom: 16} spacing: 8
+                View{width: Fill height: Fit flow: Right align: Align{y: 0.5}
+                    btn_todos_back := Bar{text: "‹ 返回" on_click: || close_detail()}
+                    View{width: Fill height: 1}
+                }
+                todos_title := Label{text: "AgentMail 待办" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 26}}
+                todos_hint := Label{width: Fill text: "你从邮件中选择跟进的事项。" draw_text.color: secondary draw_text.text_style.font_size: 13}
+                todo_rows := ScrollYView{width: Fill height: Fill flow: Down spacing: 10 padding: Inset{top: 6 bottom: 20} on_render: || {
+                    if tracked_todo_count() == 0 {
+                        Label{width: Fill text: say("todo_empty") draw_text.color: secondary draw_text.text_style.font_size: 14}
+                    }
+                    for item in action_items {
+                        if item.status == "todo" || item.status == "done" {
+                            let action_id = item.id
+                            let due_text = say("no_due")
+                            if item.deadline != "" { due_text = say("due") + item.deadline }
+                            SolidView{width: Fill height: Fit flow: Down padding: 12 spacing: 5 draw_bg +: {color: #xf2f2f7 border_radius: 10.0}
+                                View{width: Fill height: Fit flow: Right spacing: 8
+                                    Label{width: Fill text: item.title draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 15}}
+                                    Label{text: action_state_face(item.status) draw_text.color: secondary draw_text.text_style.font_size: 12}
+                                }
+                                Label{width: Fill text: due_text draw_text.color: secondary draw_text.text_style.font_size: 12}
+                                Label{width: Fill text: item.sender + " · " + item.subject max_lines: 2 draw_text.color: secondary draw_text.text_style.font_size: 12}
+                                Label{width: Fill text: say("evidence") + item.evidence max_lines: 3 draw_text.color: ink draw_text.text_style.font_size: 12}
+                                View{width: Fill height: Fit flow: Right spacing: 4
+                                    Bar{text: say("source") on_click: || open_action_source(action_id)}
+                                    if item.status == "todo" {
+                                        Bar{text: say("complete") on_click: || set_action_status(action_id, "done")}
+                                        Bar{text: say("ignore") on_click: || set_action_status(action_id, "ignored")}
+                                    } else {
+                                        Bar{text: say("reopen") on_click: || set_action_status(action_id, "todo")}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }}
+            }
             reader := SolidView{visible: false width: Fill height: Fill flow: Down new_batch: true draw_bg.color: #xffffff
         View{width: Fill height: Fit flow: Right align: Align{y: 0.5} padding: Inset{left: 8 right: 8 top: 8}
             btn_back := Bar{text: "‹ 返回" on_click: || back_to_inbox()}
@@ -2617,6 +2912,42 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
                 text_style_italic +: {font_size: 15} text_style_bold_italic +: {font_size: 15} text_style_fixed +: {font_size: 14}}
             summary_rule := SolidView{visible: false width: Fill height: 1 draw_bg.color: #xe5e5ea}
             r_summary := Label{visible: false width: Fill text: "" draw_text.color: ink draw_text.text_style.font_size: 15}
+            action_panel := View{visible: false width: Fill height: Fit flow: Down spacing: 8 padding: Inset{top: 8 bottom: 12}
+                action_title := Label{width: Fill text: "需要你处理" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 16}}
+                action_rows := View{width: Fill height: Fit flow: Down spacing: 8 on_render: || {
+                    let key = mail_key()
+                    if visible_action_count(key) == 0 {
+                        Label{width: Fill text: say("no_actions") draw_text.color: secondary draw_text.text_style.font_size: 13}
+                    }
+                    for item in action_items_for(key) {
+                        if item.status != "ignored" {
+                            let action_id = item.id
+                            let due_text = say("no_due")
+                            if item.deadline != "" { due_text = say("due") + item.deadline }
+                            SolidView{width: Fill height: Fit flow: Down padding: 12 spacing: 5 draw_bg +: {color: #xf2f2f7 border_radius: 10.0}
+                                View{width: Fill height: Fit flow: Right spacing: 8
+                                    Label{width: Fill text: item.title draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 14}}
+                                    Label{text: action_state_face(item.status) draw_text.color: secondary draw_text.text_style.font_size: 12}
+                                }
+                                Label{width: Fill text: due_text draw_text.color: secondary draw_text.text_style.font_size: 12}
+                                Label{width: Fill text: say("evidence") + item.evidence max_lines: 3 draw_text.color: ink draw_text.text_style.font_size: 12}
+                                View{width: Fill height: Fit flow: Right spacing: 4
+                                    Bar{text: say("source") on_click: || open_action_source(action_id)}
+                                    if item.status == "suggested" {
+                                        Bar{text: say("add_todo") on_click: || set_action_status(action_id, "todo")}
+                                        Bar{text: say("ignore") on_click: || set_action_status(action_id, "ignored")}
+                                    } else if item.status == "todo" {
+                                        Bar{text: say("complete") on_click: || set_action_status(action_id, "done")}
+                                        Bar{text: say("ignore") on_click: || set_action_status(action_id, "ignored")}
+                                    } else {
+                                        Bar{text: say("reopen") on_click: || set_action_status(action_id, "todo")}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }}
+            }
         }
     }
     composer := SolidView{visible: false width: Fill height: Fill flow: Down new_batch: true draw_bg.color: #ffffff padding: Inset{left: 12 right: 12 top: 8} spacing: 8
