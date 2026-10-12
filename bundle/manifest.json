@@ -4,15 +4,24 @@
     "storage",
     "mail",
     "model",
-    "calendar"
+    "device_calendar"
   ],
   "compute": {
     "instruction_budget": null,
     "memory_bytes": null
   },
+  "host_api": {
+    "required": {
+      "device_calendar.calendars.list": 1,
+      "device_calendar.calendars.select": 1,
+      "device_calendar.events.create": 1,
+      "device_calendar.permission.request": 1,
+      "device_calendar.permission.status": 1
+    }
+  },
   "id": "agent-mail",
   "integrity": {
-    "bundle_blake3": "bcc7b97c85312f9e45cb9f415e166f01fab58d0e5596b0e1a038a4f99c31b136"
+    "bundle_blake3": "7fdd08903bbc5fb2f8988e2a7bd034d951c24f741832657075a26ff4d656f47b"
   },
   "name": "AgentMail",
   "network": {

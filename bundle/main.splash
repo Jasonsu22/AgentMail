@@ -31,6 +31,8 @@ let chat_log = []
 let pending_q = ""
 let pending_input = ""
 let pending_event = nil
+let device_calendar_handles = {}
+let device_calendar_keys = []
 let turn_can_add = false
 let follow_gen = 0
 let follow_locked = false
@@ -139,6 +141,7 @@ fn display_name(a){
 fn load_prefs(){
     load_chats()
     load_tools()
+    load_device_calendar_handles()
     load_classes()
     load_events()
     if fs.exists("names.txt") {
@@ -1494,28 +1497,53 @@ fn save_tools(){
     }
     fs.write("tools.txt", text)
 }
+fn load_device_calendar_handles(){
+    if !fs.exists("device-calendar.txt") { return }
+    let lines = fs.read("device-calendar.txt").split("\n")
+    for line in lines {
+        let bits = line.split("|")
+        if bits.len() < 2 { continue }
+        let account_id = unpack(bits[0])
+        let handle = unpack(bits[1])
+        if account_id == "" || handle == "" { continue }
+        device_calendar_handles[account_id] = handle
+        device_calendar_keys.push(account_id)
+    }
+}
+fn save_device_calendar_handles(){
+    let text = ""
+    for account_id in device_calendar_keys {
+        let handle = device_calendar_handles[account_id]
+        if handle == nil || handle == "" { continue }
+        if text != "" { text = text + "\n" }
+        text = text + pack(account_id) + "|" + pack(handle)
+    }
+    fs.write("device-calendar.txt", text)
+}
+fn selected_device_calendar_handle(){
+    if account == nil { return "" }
+    let handle = device_calendar_handles[account.id]
+    if handle == nil { return "" }
+    return handle
+}
+fn remember_device_calendar_handle(handle){
+    if account == nil || handle == nil || handle == "" { return }
+    let known = false
+    for account_id in device_calendar_keys { if account_id == account.id { known = true } }
+    if !known { device_calendar_keys.push(account.id) }
+    device_calendar_handles[account.id] = handle
+    save_device_calendar_handles()
+}
+fn forget_device_calendar_handle(){
+    if account == nil { return }
+    device_calendar_handles[account.id] = ""
+    save_device_calendar_handles()
+}
 fn event_brief(){
     if pending_event == nil { return "" }
     let place = pending_event.location
     if place == nil { place = "" }
     return pending_event.title + " | " + pending_event.start + " – " + pending_event.end + " | " + place
-}
-fn calendar_request_id(){
-    if pending_event == nil { return "" }
-    let key = pending_event.key
-    if key == nil || key == "" { key = pending_event.title + "|" + pending_event.start }
-    return "agent-mail/" + key
-}
-fn calendar_time(text){
-    if text == nil { return "" }
-    let value = ("" + text).trim()
-    let words = value.split(" ")
-    // Models sometimes append a display-zone abbreviation (for example HKT).
-    // Calendar stores the zone separately, so keep only the local wall time.
-    if words.len() >= 2 && words[0].split("-").len() == 3 && words[1].split(":").len() >= 2 {
-        return words[0] + "T" + words[1]
-    }
-    return value
 }
 fn calendar_optional(value, key, fallback){
     if value == nil { return fallback }
@@ -1523,84 +1551,98 @@ fn calendar_optional(value, key, fallback){
     if found == nil { return fallback }
     return found
 }
-fn calendar_event_line(event){
-    let end = event.end
-    let place = event.location
-    if end == nil { end = "" }
-    if place == nil { place = "" }
-    let line = say("readback") + event.title + " | " + event.start
-    if end != "" { line = line + " – " + end }
-    if place != "" { line = line + " | " + place }
-    return line
+fn finish_device_calendar_error(answer){
+    if answer.error == "" { finish_tool(say("calendar_add_failed")) }
+    else { finish_tool(local_error(answer.error)) }
 }
-fn finish_calendar_event(event, shown, reused){
-    pending_event = nil
-    let message = say("added_cal")
-    if reused == true { message = say("already_cal") }
-    finish_tool(message + "\n" + shown + "\n" + calendar_event_line(event))
-}
-fn read_back_calendar_event(id, shown, reused){
-    host.request("calendar.events", {limit: 200}, fn(r){
-        // Host refusals may call back inside host.request. Finish UI work on
-        // the next turn, where repainting and persistence are reliable.
+fn create_device_calendar_event(handle, event, shown){
+    host.request("device_calendar.events.create", {handle: handle event: event}, fn(r){
         let answer = {is_ok: calendar_optional(r, "is_ok", false) data: calendar_optional(r, "data", nil) error: calendar_optional(r, "error", "")}
         start_timeout(0.01, || {
             if !answer.is_ok {
-                if answer.error == "" { finish_tool(say("calendar_readback_failed")) }
-                else { finish_tool(local_error(answer.error)) }
+                if answer.error.search("invalid_handle") >= 0 || answer.error.search("calendar_changed") >= 0 { forget_device_calendar_handle() }
+                finish_device_calendar_error(answer)
                 return
             }
-            let events = calendar_optional(answer.data, "events", [])
-            for event in events {
-                if event.id == id {
-                    finish_calendar_event(event, shown, reused)
-                    return
-                }
+            if calendar_optional(answer.data, "saved", false) != true {
+                finish_tool(say("calendar_add_failed"))
+                return
             }
-            finish_tool(say("readback_fail"))
+            pending_event = nil
+            finish_tool(say("os_saved") + "\n" + shown)
         })
     })
 }
-fn calendar_add_result(answer, shown){
-    let data = answer.data
-    let reused = calendar_optional(data, "reused", false)
-    let verified = calendar_optional(data, "verified", false)
-    let event = calendar_optional(data, "event", nil)
-    if answer.is_ok && verified == true && event != nil {
-        finish_calendar_event(event, shown, reused)
-        return
-    }
-    if !answer.is_ok {
-        if answer.error == "" { finish_tool(say("calendar_add_failed")) }
-        else { finish_tool(local_error(answer.error)) }
-        return
-    }
-    let id = calendar_optional(data, "id", "")
-    if id == "" { finish_tool(say("readback_fail")); return }
-    // Compatibility with an older Calendar host that returns only an id.
-    read_back_calendar_event(id, shown, reused)
+fn select_device_calendar(event, shown){
+    host.request("device_calendar.calendars.list", {}, fn(r){
+        let answer = {is_ok: calendar_optional(r, "is_ok", false) data: calendar_optional(r, "data", nil) error: calendar_optional(r, "error", "")}
+        start_timeout(0.01, || {
+            if !answer.is_ok { finish_device_calendar_error(answer); return }
+            let calendar_id = ""
+            for calendar in calendar_optional(answer.data, "calendars", []) {
+                if calendar_optional(calendar, "writable", false) == true && calendar_optional(calendar, "id", "") != "" {
+                    calendar_id = calendar.id
+                    break
+                }
+            }
+            if calendar_id == "" { finish_tool(say("no_calendar")); return }
+            host.request("device_calendar.calendars.select", {calendar_id: calendar_id}, fn(selected){
+                let result = {is_ok: calendar_optional(selected, "is_ok", false) data: calendar_optional(selected, "data", nil) error: calendar_optional(selected, "error", "")}
+                start_timeout(0.01, || {
+                    if !result.is_ok { finish_device_calendar_error(result); return }
+                    let handle = calendar_optional(result.data, "handle", "")
+                    if handle == "" { finish_tool(say("no_calendar")); return }
+                    remember_device_calendar_handle(handle)
+                    create_device_calendar_event(handle, event, shown)
+                })
+            })
+        })
+    })
+}
+fn request_device_calendar_permission(event, shown){
+    host.request("device_calendar.permission.request", {}, fn(r){
+        let answer = {is_ok: calendar_optional(r, "is_ok", false) data: calendar_optional(r, "data", nil) error: calendar_optional(r, "error", "")}
+        start_timeout(0.01, || {
+            if !answer.is_ok { finish_device_calendar_error(answer); return }
+            select_device_calendar(event, shown)
+        })
+    })
+}
+fn prepare_device_calendar_event(event, shown){
+    let handle = selected_device_calendar_handle()
+    if handle != "" { create_device_calendar_event(handle, event, shown); return }
+    host.request("device_calendar.permission.status", {}, fn(r){
+        let answer = {is_ok: calendar_optional(r, "is_ok", false) data: calendar_optional(r, "data", nil) error: calendar_optional(r, "error", "")}
+        start_timeout(0.01, || {
+            if !answer.is_ok { finish_device_calendar_error(answer); return }
+            if calendar_optional(answer.data, "supported", false) != true { finish_tool(say("cal_unsupported")); return }
+            if calendar_optional(answer.data, "app_consent", false) != true || calendar_optional(answer.data, "os_permission", "") != "granted" {
+                request_device_calendar_permission(event, shown)
+                return
+            }
+            select_device_calendar(event, shown)
+        })
+    })
 }
 fn begin_calendar_event(){
     if pending_event == nil { finish_tool(say("no_pending")); return }
     let title = pending_event.title
-    let start = calendar_time(pending_event.start)
-    let end = calendar_time(pending_event.end)
+    let start = pending_event.start
+    let end = pending_event.end
+    let start_ms = pending_event.start_ms
+    let end_ms = pending_event.end_ms
     let timezone = pending_event.timezone
     let location = pending_event.location
-    if end == nil { end = "" }
+    if start_ms == nil || end_ms == nil || start_ms <= 0 || end_ms <= start_ms { finish_tool(say("bad_time")); return }
     if timezone == nil || timezone == "" { timezone = "Asia/Shanghai" }
     if location == nil { location = "" }
     let shown = title + "\n" + start
-    if end != "" { shown = shown + " – " + end }
+    if end != nil && end != "" { shown = shown + " – " + end }
     if location != "" { shown = shown + "\n" + location }
     agent_busy = true
     ui.agent_note.set_text(say("thinking"))
-    host.request("calendar.add_event", {title: title start: start end: end timezone: timezone location: location notes: "" request_id: calendar_request_id()}, fn(r){
-        // Current Calendar returns the persisted event after a storage
-        // read-back. Copy the envelope and settle it on the next UI turn.
-        let answer = {is_ok: calendar_optional(r, "is_ok", false) data: calendar_optional(r, "data", nil) error: calendar_optional(r, "error", "")}
-        start_timeout(0.01, || calendar_add_result(answer, shown))
-    })
+    let event = {title: title start_ms: start_ms end_ms: end_ms timezone: timezone location: location notes: ""}
+    prepare_device_calendar_event(event, shown)
 }
 fn agrees(text){
     let t = text.trim()

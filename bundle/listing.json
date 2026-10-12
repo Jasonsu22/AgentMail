@@ -5,9 +5,9 @@
   "icon": "assets/icon.png",
   "screenshots": ["screenshots/01.png"],
   "category": "productivity",
-  "platforms": ["windows"],
+  "platforms": ["macos"],
   "age_rating": "all",
-  "keywords": ["mail", "email", "ai", "assistant", "summarize"],
+  "keywords": ["mail", "email", "ai", "assistant", "summarize", "calendar"],
   "publisher": {
     "name": "AAA养鸡场",
     "support": "https://github.com/Jasonsu22/AgentMail",
