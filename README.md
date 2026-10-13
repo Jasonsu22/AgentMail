@@ -9,7 +9,7 @@ your password.
 ## Features
 
 - **Read & manage mail** — inbox, folders, compose, reply, send
-- **AI summaries and to-dos** — on request, extract only user-owned action items backed by an exact quote; the assistant can also add, list, update, complete, reopen, or delete local to-dos on your request
+- **AI summaries, to-dos, and safety hints** — on request, extract user-owned action items backed by an exact quote and conservatively flag phishing, fraud requests, and suspicious links without treating ordinary personal or marketing mail as malicious by default
 - **Host-owned credentials** — sign in on the device's own sheet; passwords stay in the platform keychain
 - **Offline-first UI** — the assistant is optional; every screen works without it
 
