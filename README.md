@@ -6,23 +6,33 @@ A smart email app for [OctoSense](https://github.com/OctoSense-org/OctoSense) wi
 AI-powered summarization. Built on the `mail` host service — the app never sees
 your password.
 
-## Features
+## Current runnable features (14 groups)
 
-- **Read & manage mail** — inbox, folders, compose, reply, send
-- **AI summaries, to-dos, and safety hints** — on request, extract user-owned action items backed by an exact quote and conservatively flag phishing, fraud requests, and suspicious links without treating ordinary personal or marketing mail as malicious by default
-- **Confirm to-dos in chat** — after showing suggestions, ask whether to add them to AgentMail To-dos. Agree to add all or choose specific items; declining keeps the suggestions, and tracked items are not added twice. Calendar events are confirmed separately
-- **Pre-send correctness checks** — compare the original email, subject and draft for unanswered questions, factual discrepancies, date mismatches, contradictions and clear typos. View evidence and apply individual corrections or supply missing answers, without style rewrites. Unknown outgoing attachment status requires manual verification; changed drafts must be checked again
-- **Sender subscriptions and briefings** — confirm tracking changes, browse compact sender summaries and grouped emails from the sidebar, and ask scoped questions. Inside a sender's mail list, repeatedly call AI to generate a fresh current briefing displayed above that sender's messages
-- **Host-owned credentials** — sign in on the device's own sheet; passwords stay in the platform keychain
-- **Offline-first UI** — the assistant is optional; every screen works without it
+1. **Multiple accounts and protected credentials** — add or remove accounts through the system sign-in sheet; the host and platform keychain keep passwords, never AgentMail.
+2. **Mailbox sync and folder browsing** — expand accounts, browse Inbox / All Mail / Sent / Drafts and other folders, page through synchronized mail, refresh, and see unread state.
+3. **Message reading** — view sender, subject, body, attachment names and original text; return to a source message from summaries, to-dos or subscriptions.
+4. **Compose, reply and drafts** — write new mail or replies, save to the account's Drafts, recover local drafts after restart, and keep the most recently saved draft first.
+5. **Reviewed sending** — hand messages to the host's foreground review flow; AgentMail never bypasses that review to send directly.
+6. **Conversational mail assistant** — use natural language to browse, find, time-filter, open, draft or reply to mail; the UI uses the user's language and does not expose internal tool names.
+7. **AI summaries, translation and original text** — request a summary, translate subject and body into the configured language, and restore the original.
+8. **Phishing and fraud warnings** — when summarizing, conservatively inspect impersonation, suspicious links, credential/code requests, unusual payments and account changes; show evidence-backed ⚠️ warnings without treating personal mail, marketing mail or urgency alone as malicious.
+9. **To-do extraction and management** — extract clearly recipient-owned unfinished actions and explicit deadlines with source quotes; after confirmation, track, complete, ignore, re-add, edit or delete AgentMail to-dos.
+10. **Calendar detection and macOS Calendar writing** — find one schedule in a message, show title/time/place, and only after a second confirmation request device permission, choose a calendar, write and read back the event.
+11. **Mail classification** — only on request, classify a recent batch into existing folders; it never invents folders or sorts mail automatically.
+12. **Pre-send correctness checks** — compare source mail, recipient, subject and draft for unanswered questions, factual/number/date mismatches, contradictions and obvious typos. View evidence, fix individual items or fill an answer without style rewriting. Unknown attachment state is explicitly left for manual verification.
+13. **Sender subscriptions and focused briefings** — confirm subscribe/unsubscribe per sender, group synchronized mail by sender in the sidebar, repeatedly generate a fresh current briefing inside a sender, ask scoped questions and open cited source mail.
+14. **Sessions, personalization and settings** — create, restore and delete chat history with confirmation; configure UI language, translation language, AI provider/model connection, and localized errors.
 
-Subscriptions group received mail already synchronized by the host across folders,
-without moving messages or changing mailing-list enrollment. Refresh is attempted
-every 90 seconds while the app is open; there is no closed-app background worker.
-Each briefing and question freshly reads up to the latest 12 messages in scope and
-8,000 bytes per message; truncation and failures are disclosed. Unsynchronized
-server history is unavailable. Sync failures show a separate warning while cached
-mail stays usable; TLS verification is never disabled.
+## Limits and safety
+
+- AI summaries, translation, checks and briefings require a configured, available AI provider; non-AI mail, draft and settings screens remain usable without it.
+- Subscriptions group only mail already synchronized to the device, deduplicate copies across folders, never move mail or change a sender's mailing-list enrollment, and refresh every 90 seconds only while the app is open.
+- Each subscription briefing or scoped question freshly reads at most the latest 12 indexed emails and the first 8,000 bytes of each. Unsynchronized server history is unavailable; truncation and read failures are disclosed.
+- Actions with external impact—sending, Calendar writes, to-do changes, subscription changes and deleting a chat—require a visible user confirmation. Email content is never treated as authorization.
+
+## Demo and verification
+
+The repository includes repeatable isolated fixtures: 27 to-do/draft checks, 22 pre-send checks, 26 subscription checks, and one subscription cold-start check. They use temporary state plus simulated mail/model services, so they safely demonstrate confirmations, errors and boundaries without accessing a real mailbox, sending email or writing a real calendar. A live demo should use only read-only mail actions and wait for the real AI response; show the confirmation UI for sending and Calendar writing unless an operator explicitly approves execution.
 
 ## Structure
 
