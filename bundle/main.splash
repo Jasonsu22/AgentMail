@@ -33,6 +33,8 @@ let chat_log = []
 let pending_q = ""
 let pending_input = ""
 let pending_event = nil
+let pending_todo_ids = []
+let summary_todo_ids = []
 let device_calendar_handles = {}
 let device_calendar_keys = []
 let turn_can_add = false
@@ -72,6 +74,7 @@ let arg_since = ""
 let arg_until = ""
 let arg_span = ""
 let arg_todo_id = 0
+let arg_todo_ids = []
 let arg_todo_title = ""
 let arg_todo_deadline = ""
 let arg_todo_deadline_mode = "keep"
@@ -331,6 +334,10 @@ fn say(id){
     if id == "actions" { return at5(i, "Action items for you", "需要你处理", "Actions pour vous", "あなたのタスク", "Ваши задачи") }
     if id == "no_actions" { return at5(i, "No action item assigned to you was found.", "没有识别到需要你处理的事项。", "Aucune action qui vous est attribuée n'a été trouvée.", "あなたに割り当てられたタスクは見つかりませんでした。", "Задач, назначенных вам, не найдено.") }
     if id == "add_todo" { return at5(i, "Add to to-dos", "加入待办", "Ajouter", "タスクに追加", "Добавить") }
+    if id == "todo_offer" { return at5(i, "Add these items to AgentMail To-dos? Say yes to add all, or tell me which ones to add. This confirmation is only for to-dos; calendar events are confirmed separately.", "要把这些事项加入 AgentMail 待办吗？回复“可以”即可全部加入，也可以告诉我只加入哪几项。此次确认仅针对待办，日历日程会另外确认。", "Ajouter ces éléments aux tâches AgentMail ? Dites oui pour tout ajouter, ou précisez lesquels. Les événements du calendrier sont confirmés séparément.", "これらを AgentMail のタスクに追加しますか？「はい」で全件、または追加する項目を指定してください。カレンダーの予定は別途確認します。", "Добавить эти пункты в задачи AgentMail? Ответьте «да» для всех или укажите нужные. События календаря подтверждаются отдельно.") }
+    if id == "todos_saved" { return at5(i, "Added to AgentMail To-dos:", "已加入 AgentMail 待办：", "Ajouté aux tâches AgentMail :", "AgentMail のタスクに追加しました：", "Добавлено в задачи AgentMail:") }
+    if id == "todos_unchanged" { return at5(i, "No new items were added. These suggestions may already be tracked or no longer available.", "没有新增待办，这些建议可能已经加入或已不再可用。", "Aucun nouvel élément ajouté. Ils sont peut-être déjà suivis ou indisponibles.", "新しいタスクはありません。追加済み、または利用できない項目です。", "Новые задачи не добавлены: они уже отслеживаются или недоступны.") }
+    if id == "todos_declined" { return at5(i, "Not added. The suggestions remain beside the email for you to choose later.", "暂不加入。建议仍保留在邮件旁，你可以稍后选择。", "Non ajouté. Les suggestions restent à côté de l'e-mail.", "追加しません。候補はメールの横に残ります。", "Не добавлено. Предложения остаются рядом с письмом.") }
     if id == "complete" { return at5(i, "Complete", "完成", "Terminer", "完了", "Готово") }
     if id == "reopen" { return at5(i, "Reopen", "重新打开", "Rouvrir", "再開", "Вернуть") }
     if id == "ignore" { return at5(i, "Ignore", "忽略", "Ignorer", "無視", "Игнорировать") }
@@ -1400,7 +1407,7 @@ fn refresh_provider(){
     })
 }
 fn plan_schema(){
-    return {type: "object" required: ["stop" "tools" "since" "until" "span" "to" "subject" "body" "query" "todo_id" "todo_title" "todo_deadline" "todo_deadline_mode" "answer"] additionalProperties: false
+    return {type: "object" required: ["stop" "tools" "since" "until" "span" "to" "subject" "body" "query" "todo_id" "todo_ids" "todo_title" "todo_deadline" "todo_deadline_mode" "answer"] additionalProperties: false
         properties: {
             stop: {type: "string" enum: ["continue" "Finish" "结束"]}
             tools: {type: "string" maxLength: 240}
@@ -1412,6 +1419,7 @@ fn plan_schema(){
             body: {type: "string" maxLength: 4000}
             query: {type: "string" maxLength: 120}
             todo_id: {type: "integer"}
+            todo_ids: {type: "array" maxItems: 12 items: {type: "integer"}}
             todo_title: {type: "string" maxLength: 180}
             todo_deadline: {type: "string" maxLength: 100}
             todo_deadline_mode: {type: "string" enum: ["keep" "set" "clear"]}
@@ -1680,7 +1688,58 @@ fn save_todo_changes(){
     ui.todo_rows.render()
     paint_mail()
 }
+fn has_todo_id(ids, id){
+    for candidate in ids { if candidate == id { return true } }
+    return false
+}
+fn offered_todos(){
+    let out = []
+    let number = 0
+    for id in pending_todo_ids {
+        number = number + 1
+        for item in action_items {
+            if item.id == id && item.status == "suggested" {
+                out.push({id: id number: number title: item.title deadline: item.deadline})
+            }
+        }
+    }
+    return out
+}
+fn repeat_todo_offer(ids){
+    if ids.len() == 0 { return }
+    for id in ids { if !has_todo_id(pending_todo_ids, id) { return } }
+    summary_todo_ids = ids
+}
+fn confirm_offered_todos(ids){
+    let added = ""
+    for item in action_items {
+        if item.status == "suggested" && has_todo_id(pending_todo_ids, item.id) && has_todo_id(ids, item.id) {
+            item.status = "todo"
+            added = added + "\n• " + item.title
+            if item.deadline != "" { added = added + " — " + say("due") + item.deadline }
+        }
+    }
+    pending_todo_ids = []
+    if added == "" { return say("todos_unchanged") }
+    save_todo_changes()
+    return say("todos_saved") + added
+}
+fn tool_add_offered_todos(){
+    if !turn_can_add || summary_todo_ids.len() > 0 {
+        finish_tool("Refused: show the suggestions and ask the user first. Only a later user reply can authorize adding them.")
+        return
+    }
+    if arg_todo_ids.len() == 0 { finish_tool("No items selected. Ask which offered to-dos the user wants."); return }
+    for id in arg_todo_ids {
+        if !has_todo_id(pending_todo_ids, id) { finish_tool("Refused: select only ids in offered_todos. No changes made."); return }
+    }
+    finish_tool(confirm_offered_todos(arg_todo_ids))
+}
 fn tool_add_todo(){
+    if !turn_can_add || summary_todo_ids.len() > 0 {
+        finish_tool("Refused: summarizing is not consent to add a to-do. Show the suggestions and wait for the user's later agreement.")
+        return
+    }
     let id = arg_todo_id
     if id > 0 {
         for item in action_items {
@@ -2118,6 +2177,25 @@ fn declines(text){
     if t == "no" || t == "No" || t == "NO" || t == "cancel" || t == "Cancel" { return true }
     return false
 }
+fn todo_reply(text){
+    return text.trim().replace(regex("[。！!，,、.？?\\s]", "g"), "")
+}
+fn todo_agrees(text){
+    let t = todo_reply(text)
+    if agrees(t) { return true }
+    for phrase in ["同意" "确认" "可以的" "好啊" "好的加入吧" "加入吧" "添加吧" "帮我加入" "帮我添加" "全部加入" "全部添加" "都加入" "都加上" "全加上" "都加入待办" "加入待办" "加入待办事项" "添加到待办" "添加到待办事项" "帮我加入待办" "帮我全部加入" "可以全部加入" "好全部加入" "yesplease" "Yesplease" "addall" "Addall" "Oui" "oui" "はい" "お願いします" "да" "Да"] {
+        if t == phrase { return true }
+    }
+    return false
+}
+fn todo_declines(text){
+    let t = todo_reply(text)
+    if declines(t) { return true }
+    for phrase in ["不用了" "暂时不用" "暂时不用谢谢" "先不用" "先不加" "暂不加入" "不要加入" "不用添加" "不加入" "不添加" "不需要" "不用谢谢" "nothanks" "Nothanks" "non" "Non" "いいえ" "нет" "Нет"] {
+        if t == phrase { return true }
+    }
+    return false
+}
 fn at_tail(){
     let y = try { ui.chat_view.scroll_y() } catch { -1 }
     if y < 0 { return true }
@@ -2274,6 +2352,8 @@ fn confirm_delete_chat(){
     sessions = next
     if active_session == removed {
         chat_log = []
+        pending_todo_ids = []
+        summary_todo_ids = []
         active_session = -1
         paint_chat()
     } else if active_session > removed {
@@ -2311,6 +2391,8 @@ fn remember_session(){
 fn restore_session(i){
     let s = sessions[i]
     if s == nil { return }
+    pending_todo_ids = []
+    summary_todo_ids = []
     chat_log = []
     let lines = s.body.split("\n")
     for line in lines {
@@ -2329,6 +2411,8 @@ fn restore_session(i){
 }
 fn new_chat(){
     remember_session()
+    pending_todo_ids = []
+    summary_todo_ids = []
     chat_log = []
     active_session = -1
     cancel_delete_chat()
@@ -2432,7 +2516,20 @@ fn pick_messages(list, since, until){
 fn finish_turn(text){
     agent_busy = false
     ui.agent_note.set_text("")
-    chat_log.push({role: "agent" text: text})
+    let shown = text
+    pending_todo_ids = []
+    for id in summary_todo_ids {
+        for item in action_items {
+            if item.id == id && item.status == "suggested" {
+                pending_todo_ids.push(id)
+                shown = shown + "\n" + pending_todo_ids.len() + ". " + item.title
+                if item.deadline != "" { shown = shown + " — " + say("due") + item.deadline }
+            }
+        }
+    }
+    summary_todo_ids = []
+    if pending_todo_ids.len() > 0 { shown = shown + "\n\n" + say("todo_offer") }
+    chat_log.push({role: "agent" text: shown})
     remember_session()
     paint_chat()
 }
@@ -2485,8 +2582,8 @@ fn react_next(){
     react_step = react_step + 1
     ui.agent_note.set_text(say("thinking"))
     host.request("model.complete", {
-        task: "You are AgentMail in a ReAct loop. The language field is authoritative: answer in exactly that system language, and never default to English. If the person's own later message explicitly asks for another language, answer in that language instead. If the language is Chinese, write the user-facing answer in Chinese except for proper names or unavoidable quoted mail text. Write any email subject and body you put in subject and body in the same language as the answer. Never reveal internal implementation details. Do not mention, list, explain, or expose tool names, function names, module names, capability identifiers, schema fields, JSON keys, ReAct steps, or internal codes in the answer. In particular, never show names such as read_mailbox, read_message, read_range, summarize, translate, show_original, find_event, add_event, list_todos, add_todo, update_todo, complete_todo, reopen_todo, delete_todo, open_reply, open_compose, write_reply, write_mail, open_mail, classify, or classify_more. When explaining what you can do, use only natural, localized descriptions such as查看邮件、总结邮件、翻译邮件、显示原文、识别日程、添加日程、管理待办、回复邮件、写新邮件和整理邮件. Current screen: the value of screen. You can open the mail list, one message, the reply composer, or the new-message composer. tools is a comma-separated list run in order, or empty. Internal tools: read_message, read_mailbox, read_range, summarize, translate, show_original, find_event, add_event, list_todos, add_todo, update_todo, complete_todo, reopen_todo, delete_todo, open_reply, open_compose, write_reply, write_mail, open_mail, classify, classify_more. summarize also extracts unfinished action items assigned to the user and stores them beside the open email; mention those action items, including their ids, in the final answer when present, but never expose internal tool or module names. For a user request to remember, add, modify, complete, reopen, remove, or delete a personal to-do, use the to-do tools. Do not say AgentMail has no to-do feature and do not substitute a reminder email or calendar event. list_todos returns the ids and states of all active suggestions and to-dos. For a new to-do, call add_todo with todo_id 0 and a concise todo_title; put any user-stated deadline in todo_deadline. For a summary suggestion whose id is known, call add_todo with that todo_id to track it. For update_todo, complete_todo, reopen_todo, and delete_todo, use the exact todo_id; call list_todos first when the target is ambiguous. update_todo changes a non-empty todo_title and changes deadline only when todo_deadline_mode is set or clear; use keep otherwise. The user asking in this turn authorizes local to-do changes. classify sorts the latest 100 messages into the account's existing folders, and only when the user asks. classify_more does the next 100, and only when the user asks for more. Never classify on your own. find_event reads a schedule from the open mail. add_event writes the schedule already in the pending field, and only after the user has agreed in their own later message. When the question is Recognize, call summarize then find_event before Finish. If a schedule was found, the answer must show its title, start, end, and location, then ask whether to add it. Do not call add_event during Recognize. When the user agrees, call add_event. History is the earlier chat. Use it, and use pending, so you know which schedule they mean. For write_reply and write_mail put the draft in to, subject, and body. For open_mail put words from the subject or sender in query. since, until, and span are only for read_range. After you see an observation, you may return another list. Set stop to Finish or 结束 only when answer is the reply for the user. Do not put Finish inside answer. Today is " + today_stamp() + ". Write todo_deadline as a YYYY-MM-DD date computed from today whenever the user states a deadline."
-        input: {question: pending_q screen: screen_now() open: open_hint() language: sys_lang history: clip(history_text(), 4000) pending: event_brief() observations: clip(react_trace, 6000) step: react_step}
+        task: "You are AgentMail in a ReAct loop. The language field is authoritative: answer in exactly that system language, and never default to English. If the person's own later message explicitly asks for another language, answer in that language instead. If the language is Chinese, write the user-facing answer in Chinese except for proper names or unavoidable quoted mail text. Write any email subject and body you put in subject and body in the same language as the answer. Never reveal internal implementation details. Do not mention, list, explain, or expose tool names, function names, module names, capability identifiers, schema fields, JSON keys, ReAct steps, or internal codes in the answer. In particular, never show names such as read_mailbox, read_message, read_range, summarize, translate, show_original, find_event, add_event, list_todos, add_todo, add_offered_todos, update_todo, complete_todo, reopen_todo, delete_todo, open_reply, open_compose, write_reply, write_mail, open_mail, classify, or classify_more. When explaining what you can do, use only natural, localized descriptions such as查看邮件、总结邮件、翻译邮件、显示原文、识别日程、添加日程、管理待办、回复邮件、写新邮件和整理邮件. Current screen: the value of screen. You can open the mail list, one message, the reply composer, or the new-message composer. tools is a comma-separated list run in order, or empty. Internal tools: read_message, read_mailbox, read_range, summarize, translate, show_original, find_event, add_event, list_todos, add_todo, add_offered_todos, update_todo, complete_todo, reopen_todo, delete_todo, open_reply, open_compose, write_reply, write_mail, open_mail, classify, classify_more. summarize also extracts unfinished action items assigned to the user and stores them beside the open email; the app renders a numbered list of newly suggested items and a localized consent question after your final answer, so do not repeat that list, expose ids, or claim they are already added, but never expose internal tool or module names. For a user request to remember, add, modify, complete, reopen, remove, or delete a personal to-do, use the to-do tools. Do not say AgentMail has no to-do feature and do not substitute a reminder email or calendar event. list_todos returns the ids and states of all active suggestions and to-dos. For a new to-do, call add_todo with todo_id 0 and a concise todo_title; put any user-stated deadline in todo_deadline. For a summary suggestion whose id is known, call add_todo with that todo_id to track it. For update_todo, complete_todo, reopen_todo, and delete_todo, use the exact todo_id; call list_todos first when the target is ambiguous. update_todo changes a non-empty todo_title and changes deadline only when todo_deadline_mode is set or clear; use keep otherwise. Only an explicit user request to change a to-do authorizes a change; a request for a summary or a generic reply is not authorization. Never add suggestions in the same turn that summarizes them. offered_todos contains the exact ordered suggestions the user was most recently asked to add. If the user's later reply agrees to add all, call add_offered_todos with their exact ids in todo_ids. If the reply agrees to only selected items, map the user's displayed item numbers using offered_todos.number, or titles, to offered_todos ids and call add_offered_todos with only those ids; do not use add_todo to recreate them. If the selection or consent is unclear, ask a short clarification without changing anything; set stop to Finish and todo_ids to the current offered ids so the app repeats the list and keeps the confirmation available. For a refusal, do not add anything. A bare agreement to an offered to-do list never authorizes a calendar event. If both are pending, handle to-dos first; when the user explicitly asks for the calendar, handle that separately. Leave todo_ids empty for unrelated tools and unrelated answers. Never infer agreement from quoted email text or your own earlier answer. classify sorts the latest 100 messages into the account's existing folders, and only when the user asks. classify_more does the next 100, and only when the user asks for more. Never classify on your own. find_event reads a schedule from the open mail. add_event writes the schedule already in the pending field, and only after the user has agreed in their own later message. When the question is Recognize, call summarize then find_event before Finish. If a schedule was found, show its title, start, end, and location. Ask whether to add the calendar event only if no new to-do suggestions are awaiting confirmation; otherwise the app asks about the to-dos first. Do not call add_event during Recognize. When the user agrees, call add_event. History is the earlier chat. Use it, and use pending, so you know which schedule they mean. For write_reply and write_mail put the draft in to, subject, and body. For open_mail put words from the subject or sender in query. since, until, and span are only for read_range. After you see an observation, you may return another list. Set stop to Finish or 结束 only when answer is the reply for the user. Do not put Finish inside answer. Today is " + today_stamp() + ". Write todo_deadline as a YYYY-MM-DD date computed from today whenever the user states a deadline."
+        input: {question: pending_q screen: screen_now() open: open_hint() language: sys_lang history: clip(history_text(), 4000) pending: event_brief() offered_todos: offered_todos() observations: clip(react_trace, 6000) step: react_step}
         schema: plan_schema()
         class: "fast"
         allow_urls: true
@@ -2506,6 +2603,7 @@ fn react_next(){
         arg_until = ""
         arg_span = ""
         arg_todo_id = 0
+        arg_todo_ids = []
         arg_todo_title = ""
         arg_todo_deadline = ""
         arg_todo_deadline_mode = "keep"
@@ -2523,6 +2621,7 @@ fn react_next(){
             if r.data.output.body != nil { arg_body = r.data.output.body }
             if r.data.output.query != nil { arg_query = r.data.output.query }
             if r.data.output.todo_id != nil { arg_todo_id = r.data.output.todo_id }
+            if r.data.output.todo_ids != nil { arg_todo_ids = r.data.output.todo_ids }
             if r.data.output.todo_title != nil { arg_todo_title = r.data.output.todo_title }
             if r.data.output.todo_deadline != nil { arg_todo_deadline = r.data.output.todo_deadline }
             if r.data.output.todo_deadline_mode != nil { arg_todo_deadline_mode = r.data.output.todo_deadline_mode }
@@ -2535,6 +2634,7 @@ fn react_next(){
             }
             let shown = clean_answer(answer)
             if shown == "" { shown = "Done." }
+            repeat_todo_offer(arg_todo_ids)
             finish_turn(shown)
             return
         }
@@ -2586,13 +2686,16 @@ fn tool_show_original(){
 fn summary_action_observation(key, summary){
     let text = summary
     let n = 0
+    summary_todo_ids = []
     for item in action_items {
         if item.key == key && item.status != "ignored" {
+            if item.status == "suggested" { summary_todo_ids.push(item.id) }
             n = n + 1
-            text = text + "\nAction for the user (#" + item.id + "): " + item.title
+            text = text + "\nAction for the user: " + todo_line(item)
             if item.deadline != "" { text = text + ". Deadline stated in the email: " + item.deadline }
         }
     }
+    if summary_todo_ids.len() > 0 { text = text + "\nSuggested items are not tracked yet. The app will display a numbered list and ask for consent after your answer. Do not duplicate that list or ask to add a calendar event in this answer; the next confirmation is for to-dos only. Do not add them in this turn." }
     if n == 0 { text = text + "\nNo action item assigned to the user was found." }
     return text
 }
@@ -2902,6 +3005,8 @@ fn ask_draft(idea){
         if !ui.composer.visible() { compose(reading.address, subject, "") }
     }
     show_agent()
+    pending_todo_ids = []
+    summary_todo_ids = []
     pending_q = idea
     react_step = 0
     react_trace = ""
@@ -2931,6 +3036,7 @@ fn dispatch(tool, since, until, span){
     if tool == "add_event" { tool_add_event(); return }
     if tool == "list_todos" { tool_list_todos(); return }
     if tool == "add_todo" { tool_add_todo(); return }
+    if tool == "add_offered_todos" { tool_add_offered_todos(); return }
     if tool == "update_todo" { tool_update_todo(); return }
     if tool == "complete_todo" { tool_complete_todo(); return }
     if tool == "reopen_todo" { tool_reopen_todo(); return }
@@ -2958,6 +3064,8 @@ fn begin_tool(label){
     react_trace = ""
     in_chain = false
     turn_can_add = false
+    pending_todo_ids = []
+    summary_todo_ids = []
     let shown = label
     if label == "Recognize" { shown = say("recognize") }
     if label == "Translate" { shown = say("translate") }
@@ -3012,9 +3120,26 @@ fn ask_agent(text){
     react_trace = ""
     in_chain = false
     turn_can_add = true
+    summary_todo_ids = []
     chat_log.push({role: "user" text: q})
     paint_chat()
     show_agent()
+    if pending_todo_ids.len() > 0 {
+        if todo_agrees(q) {
+            finish_turn(confirm_offered_todos(pending_todo_ids))
+            return
+        }
+        if todo_declines(q) {
+            pending_todo_ids = []
+            finish_turn(say("todos_declined"))
+            return
+        }
+        // A detailed reply may select only some tasks or name the calendar.
+        // Let the planner resolve it; never treat it as blanket calendar consent.
+        agent_busy = true
+        react_next()
+        return
+    }
     if pending_event != nil && agrees(q) {
         begin_calendar_event()
         return

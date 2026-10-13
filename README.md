@@ -10,6 +10,7 @@ your password.
 
 - **Read & manage mail** — inbox, folders, compose, reply, send
 - **AI summaries, to-dos, and safety hints** — on request, extract user-owned action items backed by an exact quote and conservatively flag phishing, fraud requests, and suspicious links without treating ordinary personal or marketing mail as malicious by default
+- **Confirm to-dos in chat** — after showing suggestions, ask whether to add them to AgentMail To-dos. Agree to add all or choose specific items; declining keeps the suggestions, and tracked items are not added twice. Calendar events are confirmed separately
 - **Host-owned credentials** — sign in on the device's own sheet; passwords stay in the platform keychain
 - **Offline-first UI** — the assistant is optional; every screen works without it
 

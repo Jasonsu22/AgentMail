@@ -1,6 +1,7 @@
 build/
 target/
 .local-state/
+tests/
 *.key
 *.cert
 .DS_Store
