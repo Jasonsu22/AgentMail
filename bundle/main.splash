@@ -35,6 +35,7 @@ let pending_input = ""
 let pending_event = nil
 let pending_todo_ids = []
 let summary_todo_ids = []
+let recognize_summary = ""
 let device_calendar_handles = {}
 let device_calendar_keys = []
 let turn_can_add = false
@@ -143,6 +144,74 @@ let subscription_job_i = 0
 let subscription_job_body = ""
 let subscription_chat_sources = []
 let subscription_address_cache = {}
+// LOCAL DEMO ONLY — intentionally uncommitted. Set to false or remove this
+// block to return to the real mailbox.
+let demo_mailbox = true
+let demo_real_host = nil
+let demo_mail = [
+    {id: "demo-calendar" folder: "INBOX" sender: "大学教务处" address: "office@campus.example" subject: "课程调整：10 月 16 日 09:00 上课" time: "Oct 14" date: "2026-10-14T09:00:00+08:00" body: "课程《AI 产品设计》调整至 2026-10-16 09:00 至 10:00，在 218 教室上课。请准时参加。" attachments: []}
+    {id: "demo-translate" folder: "INBOX" sender: "Northstar Workshop" address: "hello@northstar-workshop.example" subject: "Your Friday workshop is confirmed" time: "Oct 14" date: "2026-10-14T08:45:00+08:00" body: "Hello Jason,\n\nYour product design workshop is confirmed for Friday, October 16, from 2:00 PM to 4:00 PM. Please bring your laptop and the latest project notes.\n\nBest regards,\nNorthstar Workshop Team" attachments: []}
+    {id: "demo-phish" folder: "INBOX" sender: "Google 安全中心" address: "security@goog1e-verify.example" subject: "紧急：请立即验证您的账户" time: "Oct 14" date: "2026-10-14T08:30:00+08:00" body: "您的账户将在 24 小时内停用。请立即访问 https://goog1e-verify.example/login 并输入密码和验证码以恢复访问。" attachments: []}
+    {id: "demo-todo" folder: "INBOX" sender: "合作伙伴团队" address: "partner@example.com" subject: "请确认活动报名与预算" time: "Oct 13" date: "2026-10-13T16:00:00+08:00" body: "请在 2026-10-17 前回复是否参加晚宴，并提交活动报名表。预算仍需您确认。" attachments: []}
+    {id: "demo-reply" folder: "INBOX" sender: "客户支持" address: "client@example.com" subject: "活动安排需要确认" time: "Oct 13" date: "2026-10-13T11:00:00+08:00" body: "这次会议共 12 人参加。请问预算是多少？是否确认周五下午 3 点？附件是否会随回复发送？" attachments: []}
+    {id: "demo-adobe-1" folder: "INBOX" sender: "Adobe 新闻" address: "mail@mail.adobe.example" subject: "免费将纸质文档转换为 PDF" time: "Oct 12" date: "2026-10-12T10:00:00+08:00" body: "Adobe Acrobat 本期介绍将纸质文档转换为 PDF 的方法，并提供在线阅读链接和退订说明。" attachments: []}
+    {id: "demo-adobe-2" folder: "INBOX" sender: "Adobe 新闻" address: "mail@mail.adobe.example" subject: "本周 Acrobat 文档整理技巧" time: "Oct 11" date: "2026-10-11T10:00:00+08:00" body: "Adobe Acrobat 本周新增批量整理 PDF 与共享审阅的技巧，适合需要整理文档的用户。" attachments: []}
+    {id: "demo-private" folder: "INBOX" sender: "小明" address: "xiaoming@example.com" subject: "周末一起吃饭吗？" time: "Oct 10" date: "2026-10-10T18:00:00+08:00" body: "周末有空一起吃饭吗？如果你忙也没关系，之后再约。" attachments: []}
+]
+
+fn demo_find_mail(id){
+    for m in demo_mail { if m.id == id { return m } }
+    return nil
+}
+fn demo_headers(folder_id){
+    let rows = []
+    for m in demo_mail {
+        if m.folder != folder_id { continue }
+        rows.push({id: m.id sender: m.sender address: m.address subject: m.subject preview: clip(m.body, 90) time: m.time unread: true})
+    }
+    return rows
+}
+fn demo_host(method, args, callback){
+    if method == "mail.accounts" { callback({is_ok: true data: [{id: "demo" address: "demo@agentmail.local"}]}); return }
+    if method == "mail.folders" { callback({is_ok: true data: [{id: "INBOX" name: "Inbox" role: "inbox"} {id: "Archive" name: "Archive" role: "archive"} {id: "Sent" name: "Sent" role: "sent"} {id: "Drafts" name: "Drafts" role: "drafts"}]}); return }
+    if method == "mail.sync" { callback({is_ok: true data: {new: 0}}); return }
+    if method == "mail.list" {
+        let rows = demo_headers(args.folder)
+        let page = []
+        let start = args.offset
+        let end = start + args.limit
+        for i in rows.len() { if i >= start && i < end { page.push(rows[i]) } }
+        callback({is_ok: true data: {folder: args.folder total: rows.len() messages: page}})
+        return
+    }
+    if method == "mail.message" {
+        let m = demo_find_mail(args.message)
+        if m == nil { callback({is_ok: false error: "demo mail not found"}) }
+        else { callback({is_ok: true data: {id: m.id sender: m.sender address: m.address subject: m.subject body: m.body html: "" time: m.time attachments: m.attachments}}) }
+        return
+    }
+    if method == "mail.peek" {
+        let m = demo_find_mail(args.message)
+        if m == nil { callback({is_ok: false error: "demo mail not found"}) }
+        else { callback({is_ok: true data: {id: m.id account: args.account folder: args.folder address: m.address subject: m.subject body: m.body date: m.date next_offset: nil}}) }
+        return
+    }
+    if method == "mail.mark_read" { callback({is_ok: true data: {}}); return }
+    if demo_real_host != nil { demo_real_host.request(method, args, callback); return }
+    callback({is_ok: false error: "unsupported demo request: " + method})
+}
+fn load_demo_mailbox(){
+    demo_real_host = host
+    host = {request: fn(method, args, callback){ demo_host(method, args, callback) }}
+    accounts = [{id: "demo" address: "demo@agentmail.local"}]
+    account = accounts[0]
+    folders_by["demo"] = [{id: "INBOX" name: "Inbox" role: "inbox"} {id: "Archive" name: "Archive" role: "archive"} {id: "Sent" name: "Sent" role: "sent"} {id: "Drafts" name: "Drafts" role: "drafts"}]
+    open_by["demo"] = true
+    pane("inbox")
+    show_heading()
+    ui.rail_slot.render()
+    list()
+}
 
 fn status(text){ ui.status.set_text(text) }
 fn pane(name){
@@ -518,6 +587,8 @@ fn say(id){
     if id == "still_working" { return at5(i, "Still working…", "还在处理…", "Encore en cours…", "まだ処理中です…", "Ещё работаю…") }
     if id == "need_account" { return at5(i, "Add an account first.", "请先添加账号。", "Ajoutez d'abord un compte.", "先にアカウントを追加してください。", "Сначала добавьте аккаунт.") }
     if id == "not_added" { return at5(i, "Not added to the schedule.", "没有加入日程。", "Pas ajouté à l'agenda.", "予定には追加しませんでした。", "В расписание не добавлено.") }
+    if id == "calendar_found" { return at5(i, "Calendar event detected:", "识别到以下日程：", "Événement détecté :", "次の予定を検出しました：", "Обнаружено событие календаря:") }
+    if id == "calendar_offer" { return at5(i, "Would you like to add it to your calendar? Reply yes to continue.", "是否要将它加入你的日历？回复“可以”即可继续。", "Voulez-vous l'ajouter à votre calendrier ? Répondez oui pour continuer.", "カレンダーに追加しますか？「はい」で続行します。", "Добавить его в календарь? Ответьте «да», чтобы продолжить.") }
     if id == "no_pending" { return at5(i, "There is no schedule waiting.", "没有等待写入的日程。", "Aucun horaire en attente.", "書き込み待ちの予定はありません。", "Нет расписания для записи.") }
     if id == "added_cal" { return at5(i, "Added to the schedule.", "已加入日程。", "Ajouté à l'agenda.", "予定に追加しました。", "Добавлено в расписание.") }
     if id == "already_cal" { return at5(i, "This schedule is already saved.", "日程里已经有这一条。", "Cet horaire est déjà enregistré.", "この予定はすでにあります。", "Это расписание уже сохранено.") }
@@ -3255,6 +3326,9 @@ fn finish_turn(text){
     agent_busy = false
     ui.agent_note.set_text("")
     let shown = text
+    if pending_q == "Recognize" && recognize_summary != "" && shown.search(recognize_summary) < 0 {
+        shown = recognize_summary + "\n\n" + shown
+    }
     pending_todo_ids = []
     for id in summary_todo_ids {
         for item in action_items {
@@ -3267,6 +3341,9 @@ fn finish_turn(text){
     }
     summary_todo_ids = []
     if pending_todo_ids.len() > 0 { shown = shown + "\n\n" + say("todo_offer") }
+    if pending_q == "Recognize" && pending_event != nil && pending_todo_ids.len() == 0 {
+        shown = shown + "\n\n" + say("calendar_found") + "\n" + event_brief() + "\n" + say("calendar_offer")
+    }
     chat_log.push({role: "agent" text: shown})
     remember_session()
     paint_chat()
@@ -3441,6 +3518,7 @@ fn tool_summarize(){
     if reading == nil { finish_tool("No message is open, so it was not summarized."); return }
     let key = summary_key()
     if saved_sum[key] != nil && saved_sum[key] != "" && action_key_checked(key) {
+        recognize_summary = saved_sum[key]
         paint_mail()
         finish_tool(summary_action_observation(key, saved_sum[key]))
         return
@@ -3497,6 +3575,7 @@ fn tool_summarize(){
         }
         let actions = []
         if output.actions != nil { actions = output.actions }
+        recognize_summary = text
         remember_sum(key, text)
         remember_actions(key, actions, source, source_account, source_folder, source_message, source_subject, source_sender)
         save_tools()
@@ -4035,6 +4114,8 @@ fn begin_tool(label){
     turn_can_add = false
     pending_todo_ids = []
     summary_todo_ids = []
+    recognize_summary = ""
+    if label == "Recognize" { pending_event = nil }
     let shown = label
     if label == "Recognize" { shown = say("recognize") }
     if label == "Translate" { shown = say("translate") }
@@ -4042,7 +4123,12 @@ fn begin_tool(label){
     paint_chat()
     agent_busy = true
     if label == "Translate" { dispatch("translate", "", "", "") }
-    else { react_next() }
+    else if label == "Recognize" {
+        ui.agent_note.set_text(say("thinking"))
+        start_timeout(1.0, || {
+            if agent_busy && pending_q == "Recognize" { react_next() }
+        })
+    } else { react_next() }
 }
 fn click_translate(){
     if trans_busy { return }
@@ -4123,7 +4209,10 @@ fn ask_agent(text){
     react_next()
 }
 
-start_timeout(0.05, || { load_local_drafts(); load_accounts(); load_prefs() })
+start_timeout(0.05, || {
+    if demo_mailbox { load_demo_mailbox() }
+    else { load_local_drafts(); load_accounts(); load_prefs() }
+})
 
 let ink = #x1c1c1e
 let secondary = #x8e8e93
@@ -4824,7 +4913,7 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
     draft_sheet := GestureView{visible: false width: Fill height: Fill align: Align{x: 0.5 y: 0.5} on_tap: |x, y| close_draft_sheet()
         draw_bg.color: #x66000000
         GestureView{width: 360 height: Fit on_tap: |x, y| { }
-            SolidView{width: Fill height: Fit flow: Down padding: 20 spacing: 12 draw_bg +: {color: #xffffffff border_radius: 14.0}
+            RoundedView{width: Fill height: Fit flow: Down padding: 20 spacing: 12 draw_bg +: {color: #xffffffff border_radius: 22.0}
                 draft_prompt := Label{text: "这封信要写什么？" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 18}}
                 cap_idea := Label{text: "让 AI 决定" draw_text.color: secondary draw_text.text_style.font_size: 12}
                 draft_idea := TextInput{width: Fill height: 96 empty_text: "" on_return: |text| send_draft_idea()
