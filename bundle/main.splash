@@ -28,6 +28,7 @@ let agent_busy = false
 let settings_tab = "account"
 let todo_tab = "todo"
 let pending_remove = ""
+let pending_chat_delete = -1
 let chat_log = []
 let pending_q = ""
 let pending_input = ""
@@ -301,6 +302,7 @@ fn say(id){
     if id == "composer" { return at5(i, "Only one recipient is allowed, and the body must be plain text.", "只能发给一个收件人，正文只能是纯文本。", "Un seul destinataire, et le texte doit être brut.", "宛先は一人だけで、本文はプレーンテキストだけです。", "Только один получатель, и текст без разметки.") }
     if id == "revision_required" { return at5(i, "The draft version does not match. Open the review again.", "草稿版本不匹配。请重新打开审阅，不要自动再发一次。", "La version du brouillon ne correspond pas. Rouvrez la revue.", "下書きの版が合いません。確認を開き直してください。", "Версия черновика не совпадает. Откройте проверку снова.") }
     if id == "submission" { return at5(i, "The send result is not certain yet. Check this draft before trying again.", "发送结果还不确定。请先查看这封草稿的状态，不要自动再发一次。", "Le résultat de l'envoi n'est pas certain. Vérifiez ce brouillon.", "送信結果がまだ分かりません。この下書きを確認してください。", "Результат отправки ещё не ясен. Сначала проверьте черновик.") }
+    if id == "mail_queue_full" { return at5(i, "New mail cannot be refreshed yet. Update or restart OctoSense, then try again.", "暂时无法刷新新邮件。请更新或重新启动 OctoSense 后再试。", "Les nouveaux messages ne peuvent pas encore être actualisés. Mettez à jour ou redémarrez OctoSense, puis réessayez.", "新着メールを更新できません。OctoSense を更新または再起動してから、もう一度お試しください。", "Новые письма пока нельзя обновить. Обновите или перезапустите OctoSense и повторите попытку.") }
     if id == "sys_title" { return at5(i, "System language", "系统语言", "Langue du système", "システム言語", "Язык системы") }
     if id == "ui_hint" { return at5(i, "The interface uses this language.", "界面使用这个语言。", "L'interface utilise cette langue.", "画面はこの言語で表示されます。", "Интерфейс на этом языке.") }
     if id == "trans_title" { return at5(i, "Translation language", "翻译语言", "Langue de traduction", "翻訳言語", "Язык перевода") }
@@ -366,6 +368,9 @@ fn say(id){
     if id == "ask" { return at5(i, "Ask", "提问", "Demander", "質問", "Спросить") }
     if id == "new_chat" { return at5(i, "New chat", "新对话", "Nouvelle discussion", "新しい会話", "Новый чат") }
     if id == "no_chats" { return at5(i, "No earlier chats yet.", "还没有更早的对话。", "Pas encore de discussion précédente.", "以前の会話はまだありません。", "Более ранних диалогов пока нет.") }
+    if id == "delete_chat_ask" { return at5(i, "Delete this chat?", "删除这段对话？", "Supprimer cette discussion ?", "この会話を削除しますか？", "Удалить этот диалог?") }
+    if id == "delete_chat_body" { return at5(i, "This chat history will be permanently deleted.", "这段聊天记录将被永久删除。", "Cet historique de discussion sera définitivement supprimé.", "このチャット履歴は完全に削除されます。", "История этого диалога будет удалена без возможности восстановления.") }
+    if id == "delete_chat" { return at5(i, "Delete", "删除", "Supprimer", "削除", "Удалить") }
     if id == "draft_prompt" { return at5(i, "What should this say?", "这封信要写什么？", "Que doit dire ce message ?", "このメールには何を書きますか？", "Что написать в письме?") }
     if id == "let_ai" { return at5(i, "Let AI decide", "让 AI 决定", "Laisser l'IA décider", "AI に任せる", "Пусть решит ИИ") }
     if id == "lang_name" { return at5(i, "Language name", "语言名称", "Nom de la langue", "言語名", "Название языка") }
@@ -464,6 +469,7 @@ fn local_error(raw){
     if t.search("Unsupported composer") >= 0 { return say("composer") }
     if t.search("expected_revision") >= 0 { return say("revision_required") }
     if t.search("Submission status") >= 0 { return say("submission") }
+    if t.search("Incoming mail queue is full") >= 0 { return say("mail_queue_full") }
     if t.search("authorization_required") >= 0 { return say("cal_denied") }
     if t.search("unsupported_platform") >= 0 { return say("cal_unsupported") }
     if t.search("Calendar review closed") >= 0 || t.search("trusted_input_required") >= 0 { return say("cal_cancelled") }
@@ -1874,6 +1880,10 @@ fn apply_chrome(){
     ui.cap_ask.set_text(say("ask"))
     ui.btn_ask_send.set_text(say("send"))
     ui.btn_new_chat.set_text(say("new_chat"))
+    ui.chat_delete_title.set_text(say("delete_chat_ask"))
+    ui.chat_delete_body.set_text(say("delete_chat_body"))
+    ui.chat_delete_cancel.set_text(say("cancel"))
+    ui.chat_delete_ok.set_text(say("delete_chat"))
     ui.draft_prompt.set_text(say("draft_prompt"))
     ui.cap_idea.set_text(say("let_ai"))
     ui.btn_draft_cancel.set_text(say("cancel"))
@@ -2234,6 +2244,44 @@ fn save_chats(){
     }
     fs.write("chats.txt", text)
 }
+fn ask_delete_chat(i){
+    let s = sessions[i]
+    if s == nil { return }
+    if agent_busy && active_session == i {
+        ui.agent_note.set_text(say("still_working"))
+        return
+    }
+    pending_chat_delete = i
+    ui.chat_delete_name.set_text(s.title)
+    ui.chat_delete_confirm.set_visible(true)
+}
+fn cancel_delete_chat(){
+    pending_chat_delete = -1
+    ui.chat_delete_confirm.set_visible(false)
+}
+fn confirm_delete_chat(){
+    let removed = pending_chat_delete
+    if removed < 0 {
+        cancel_delete_chat()
+        return
+    }
+    pending_chat_delete = -1
+    ui.chat_delete_confirm.set_visible(false)
+    let next = []
+    for i in sessions.len() {
+        if i != removed { next.push(sessions[i]) }
+    }
+    sessions = next
+    if active_session == removed {
+        chat_log = []
+        active_session = -1
+        paint_chat()
+    } else if active_session > removed {
+        active_session = active_session - 1
+    }
+    save_chats()
+    ui.history_list.render()
+}
 fn remember_session(){
     if chat_log.len() == 0 { return }
     let title = ""
@@ -2274,6 +2322,7 @@ fn restore_session(i){
         }
     }
     active_session = i
+    cancel_delete_chat()
     history_open = false
     ui.history_pane.set_visible(false)
     paint_chat()
@@ -2282,11 +2331,13 @@ fn new_chat(){
     remember_session()
     chat_log = []
     active_session = -1
+    cancel_delete_chat()
     history_open = false
     ui.history_pane.set_visible(false)
     paint_chat()
 }
 fn toggle_history(){
+    cancel_delete_chat()
     history_open = !history_open
     ui.history_pane.set_visible(history_open)
     if history_open { ui.history_list.render() }
@@ -2434,7 +2485,7 @@ fn react_next(){
     react_step = react_step + 1
     ui.agent_note.set_text(say("thinking"))
     host.request("model.complete", {
-        task: "You are AgentMail in a ReAct loop. The language field is the system language. Write answer in that language. If the person's own later messages ask for a different language, write answer in that language instead. Write any email subject and body you put in subject and body in the same language as answer. Current screen: the value of screen. You can open the mail list, one message, the reply composer, or the new-message composer. tools is a comma-separated list run in order, or empty. Tools: read_message, read_mailbox, read_range, summarize, translate, show_original, find_event, add_event, list_todos, add_todo, update_todo, complete_todo, reopen_todo, delete_todo, open_reply, open_compose, write_reply, write_mail, open_mail, classify, classify_more. summarize also extracts unfinished action items assigned to the user and stores them beside the open email; mention those action items, including their ids, in the final answer when present. For a user request to remember, add, modify, complete, reopen, remove, or delete a personal to-do, use the to-do tools. Do not say AgentMail has no to-do feature and do not substitute a reminder email or calendar event. list_todos returns the ids and states of all active suggestions and to-dos. For a new to-do, call add_todo with todo_id 0 and a concise todo_title; put any user-stated deadline in todo_deadline. For a summary suggestion whose id is known, call add_todo with that todo_id to track it. For update_todo, complete_todo, reopen_todo, and delete_todo, use the exact todo_id; call list_todos first when the target is ambiguous. update_todo changes a non-empty todo_title and changes deadline only when todo_deadline_mode is set or clear; use keep otherwise. The user asking in this turn authorizes local to-do changes. classify sorts the latest 100 messages into the account's existing folders, and only when the user asks. classify_more does the next 100, and only when the user asks for more. Never classify on your own. find_event reads a schedule from the open mail. add_event writes the schedule already in the pending field, and only after the user has agreed in their own later message. When the question is Recognize, call summarize then find_event before Finish. If a schedule was found, the answer must show its title, start, end, and location, then ask whether to add it. Do not call add_event during Recognize. When the user agrees, call add_event. History is the earlier chat. Use it, and use pending, so you know which schedule they mean. For write_reply and write_mail put the draft in to, subject, and body. For open_mail put words from the subject or sender in query. since, until, and span are only for read_range. After you see an observation, you may return another list. Set stop to Finish or 结束 only when answer is the reply for the user. Do not put Finish inside answer. Today is " + today_stamp() + ". Write todo_deadline as a YYYY-MM-DD date computed from today whenever the user states a deadline."
+        task: "You are AgentMail in a ReAct loop. The language field is authoritative: answer in exactly that system language, and never default to English. If the person's own later message explicitly asks for another language, answer in that language instead. If the language is Chinese, write the user-facing answer in Chinese except for proper names or unavoidable quoted mail text. Write any email subject and body you put in subject and body in the same language as the answer. Never reveal internal implementation details. Do not mention, list, explain, or expose tool names, function names, module names, capability identifiers, schema fields, JSON keys, ReAct steps, or internal codes in the answer. In particular, never show names such as read_mailbox, read_message, read_range, summarize, translate, show_original, find_event, add_event, list_todos, add_todo, update_todo, complete_todo, reopen_todo, delete_todo, open_reply, open_compose, write_reply, write_mail, open_mail, classify, or classify_more. When explaining what you can do, use only natural, localized descriptions such as查看邮件、总结邮件、翻译邮件、显示原文、识别日程、添加日程、管理待办、回复邮件、写新邮件和整理邮件. Current screen: the value of screen. You can open the mail list, one message, the reply composer, or the new-message composer. tools is a comma-separated list run in order, or empty. Internal tools: read_message, read_mailbox, read_range, summarize, translate, show_original, find_event, add_event, list_todos, add_todo, update_todo, complete_todo, reopen_todo, delete_todo, open_reply, open_compose, write_reply, write_mail, open_mail, classify, classify_more. summarize also extracts unfinished action items assigned to the user and stores them beside the open email; mention those action items, including their ids, in the final answer when present, but never expose internal tool or module names. For a user request to remember, add, modify, complete, reopen, remove, or delete a personal to-do, use the to-do tools. Do not say AgentMail has no to-do feature and do not substitute a reminder email or calendar event. list_todos returns the ids and states of all active suggestions and to-dos. For a new to-do, call add_todo with todo_id 0 and a concise todo_title; put any user-stated deadline in todo_deadline. For a summary suggestion whose id is known, call add_todo with that todo_id to track it. For update_todo, complete_todo, reopen_todo, and delete_todo, use the exact todo_id; call list_todos first when the target is ambiguous. update_todo changes a non-empty todo_title and changes deadline only when todo_deadline_mode is set or clear; use keep otherwise. The user asking in this turn authorizes local to-do changes. classify sorts the latest 100 messages into the account's existing folders, and only when the user asks. classify_more does the next 100, and only when the user asks for more. Never classify on your own. find_event reads a schedule from the open mail. add_event writes the schedule already in the pending field, and only after the user has agreed in their own later message. When the question is Recognize, call summarize then find_event before Finish. If a schedule was found, the answer must show its title, start, end, and location, then ask whether to add it. Do not call add_event during Recognize. When the user agrees, call add_event. History is the earlier chat. Use it, and use pending, so you know which schedule they mean. For write_reply and write_mail put the draft in to, subject, and body. For open_mail put words from the subject or sender in query. since, until, and span are only for read_range. After you see an observation, you may return another list. Set stop to Finish or 结束 only when answer is the reply for the user. Do not put Finish inside answer. Today is " + today_stamp() + ". Write todo_deadline as a YYYY-MM-DD date computed from today whenever the user states a deadline."
         input: {question: pending_q screen: screen_now() open: open_hint() language: sys_lang history: clip(history_text(), 4000) pending: event_brief() observations: clip(react_trace, 6000) step: react_step}
         schema: plan_schema()
         class: "fast"
@@ -3474,18 +3525,40 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
                 }
                     history_pane := SolidView{visible: false width: Fill height: Fill flow: Down spacing: 8 draw_bg.color: #xfafafa
                         btn_new_chat := Bar{text: "新对话" on_click: || new_chat()}
-                        history_list := ScrollYView{width: Fill height: Fill flow: Down spacing: 4 on_render: || {
+                        history_list := ScrollYView{width: Fill height: Fill flow: Down spacing: 4 scroll_bars +: {scroll_bar_y +: {bar_size: 0.0}} on_render: || {
                             if sessions.len() == 0 {
                                 Label{width: Fill text: say("no_chats") draw_text.color: secondary draw_text.text_style.font_size: 13}
                             }
                             for i in sessions.len() {
                                 let s = sessions[i]
-                                GestureView{width: Fill height: Fit padding: Inset{top: 8 bottom: 8} on_tap: |x, y| restore_session(i)
-                                    Label{width: Fill text: s.title max_lines: 2 draw_text.color: ink draw_text.text_style.font_size: 14}
+                                View{width: Fill height: Fit flow: Right align: Align{y: 0.5} spacing: 6
+                                    GestureView{width: Fill height: Fit padding: Inset{top: 8 bottom: 8} on_tap: |x, y| restore_session(i)
+                                        Label{width: Fill text: s.title max_lines: 2 draw_text.color: ink draw_text.text_style.font_size: 14}
+                                    }
+                                    ButtonFlat{text: "×" width: 32 height: 32 padding: Inset{left: 0 right: 0 top: 0 bottom: 0} on_click: || ask_delete_chat(i)
+                                        draw_bg +: {color: #x00000000 color_hover: #xffffe5e5 color_down: #xffffcccc border_size: 0.0 border_radius: 16.0}
+                                        draw_text +: {color: secondary color_hover: #xff3b30 color_down: #xff3b30 text_style +: {font_size: 18}}}
                                 }
                                 SolidView{width: Fill height: 1 draw_bg.color: #xe5e5ea}
                             }
                         }}
+                    }
+                    chat_delete_confirm := GestureView{visible: false width: Fill height: Fill flow: Overlay align: Align{x: 0.5 y: 0.5} on_tap: |x, y| cancel_delete_chat()
+                        SolidView{width: Fill height: Fill draw_bg.color: #x00000066}
+                        GestureView{width: 280 height: Fit on_tap: |x, y| { }
+                            RoundedView{width: Fill height: Fit flow: Down padding: 20 spacing: 12 draw_bg +: {color: #xffffff border_radius: 16.0}
+                                chat_delete_title := Label{text: "删除这段对话？" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 18}}
+                                chat_delete_name := Label{width: Fill text: "" max_lines: 2 draw_text.color: ink draw_text.text_style.font_size: 14}
+                                chat_delete_body := Label{width: Fill text: "这段聊天记录将被永久删除。" draw_text.color: secondary draw_text.text_style.font_size: 13}
+                                View{width: Fill height: Fit flow: Right
+                                    chat_delete_cancel := Bar{text: "取消" on_click: || cancel_delete_chat()}
+                                    View{width: Fill height: 1}
+                                    chat_delete_ok := ButtonFlat{text: "删除" height: 36 padding: Inset{left: 12 right: 12} on_click: || confirm_delete_chat()
+                                        draw_bg +: {color: #x00000000 color_hover: #xffffe5e5 color_down: #xffffcccc border_size: 0.0 border_radius: 8.0}
+                                        draw_text +: {color: #xff3b30 color_hover: #xff3b30 color_down: #xff3b30 text_style +: {font_size: 15}}}
+                                }
+                            }
+                        }
                     }
                     agent_catch := GestureView{visible: false width: Fill height: Fill on_tap: |x, y| commit_rename()}
                 }
