@@ -2530,15 +2530,15 @@ fn finish_subscription_job(token, r){
         refresh_subscriptions()
         return
     }
-    let ids = validated_subscription_sources(output)
-    if ids == nil {
-        subscription_note = say("bad_answer")
-        subscription_job = nil
-        if job.mode == "question" { finish_turn(subscription_note) }
-        refresh_subscriptions()
-        return
-    }
     if job.mode == "question" {
+        let ids = validated_subscription_sources(output)
+        if ids == nil {
+            subscription_note = say("bad_answer")
+            subscription_job = nil
+            finish_turn(subscription_note)
+            refresh_subscriptions()
+            return
+        }
         subscription_chat_sources = ids
         let answer = calendar_optional(output, "answer", say("bad_answer"))
         answer = answer + "\n\n" + say("sub_question_scope")
