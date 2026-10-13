@@ -759,7 +759,9 @@ fn saved_draft_rows(){
     if account == nil { return rows }
     let aid = "" + account.id
     let only = accounts.len() <= 1
-    for d in local_drafts {
+    // Drafts are stored oldest first; display the latest save first.
+    for i in local_drafts.len() {
+        let d = local_drafts[local_drafts.len() - 1 - i]
         let mine = ""
         if d.account != nil { mine = "" + d.account }
         if mine == aid || only {
@@ -1051,10 +1053,10 @@ fn store_local_draft(){
         if editing_draft != "" && d.id == editing_draft { same = true }
         if compose_id != "" && d.compose_id == compose_id { same = true }
         if same {
-            if !placed { next.push(row); placed = true }
+            placed = true
         } else { next.push(d) }
     }
-    if !placed { next.push(row) }
+    next.push(row)
     let fresh = !placed
     local_drafts = next
     editing_draft = id
