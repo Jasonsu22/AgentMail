@@ -26,6 +26,7 @@ let rail_open = true
 let agent_open = false
 let agent_busy = false
 let settings_tab = "account"
+let todo_tab = "todo"
 let pending_remove = ""
 let chat_log = []
 let pending_q = ""
@@ -337,6 +338,11 @@ fn say(id){
     if id == "no_due" { return at5(i, "No stated deadline", "未说明截止时间", "Aucune échéance indiquée", "期限の記載なし", "Срок не указан") }
     if id == "todo_added" { return at5(i, "Tracked", "已加入待办", "Suivie", "追跡中", "Отслеживается") }
     if id == "todo_done" { return at5(i, "Completed", "已完成", "Terminée", "完了", "Выполнено") }
+    if id == "tab_todo" { return at5(i, "To do", "待完成", "À faire", "未完了", "К выполнению") }
+    if id == "tab_ignored" { return at5(i, "Ignored", "已忽略", "Ignorées", "無視済み", "Игнорируемые") }
+    if id == "re_add" { return at5(i, "Add back to to-dos", "加回待办", "Remettre en tâche", "タスクに戻す", "Вернуть в задачи") }
+    if id == "done_empty" { return at5(i, "Nothing completed yet.", "还没有已完成的事项。", "Rien de terminé.", "完了した項目はありません。", "Ничего не завершено.") }
+    if id == "ignored_empty" { return at5(i, "Nothing ignored.", "没有被忽略的事项。", "Rien d'ignoré.", "無視した項目はありません。", "Нет игнорируемых.") }
     if id == "reply" { return at5(i, "Reply", "回复", "Répondre", "返信", "Ответить") }
     if id == "cancel" { return at5(i, "Cancel", "取消", "Annuler", "キャンセル", "Отмена") }
     if id == "draft" { return at5(i, "Help me write", "帮我写", "Écris pour moi", "書いて", "Напиши") }
@@ -1249,7 +1255,20 @@ fn show_todos(){
     ui.confirm.set_visible(false)
     ui.todos_pane.set_visible(true)
     ui.todos_hint.set_text(say("todo_hint"))
+    todo_tab = "todo"
+    ui.todo_tabs.render()
     ui.todo_rows.render()
+}
+fn todo_tab_show(tab){
+    todo_tab = tab
+    ui.todo_tabs.render()
+    ui.todo_rows.render()
+}
+// 返回 in the to-dos page steps out of a category first; only the pending
+// list's 返回 leaves the page.
+fn todos_back(){
+    if todo_tab != "todo" { todo_tab_show("todo"); return }
+    close_detail()
 }
 fn open_action_source(id){
     let chosen = nil
@@ -1492,7 +1511,11 @@ fn load_action_items(){
             if item.message != nil { message_id = "" + item.message }
             if item.subject != nil { subject = "" + item.subject }
             if item.sender != nil { sender = "" + item.sender }
-            action_items.push({id: item.id key: "" + item.key title: "" + item.title deadline: deadline evidence: "" + item.evidence status: status account: account_id folder: folder_id message: message_id subject: subject sender: sender})
+            // Backfill the real-date field for items saved before it existed;
+            // reading a missing field is a script error, so every item must
+            // carry it. iso_date_of only accepts absolute dates — a relative
+            // word like "明天" from an old save must NOT resolve against today.
+            action_items.push({id: item.id key: "" + item.key title: "" + item.title deadline: deadline due_date: iso_date_of(deadline) evidence: "" + item.evidence status: status account: account_id folder: folder_id message: message_id subject: subject sender: sender})
             if item.id >= next_action_id { next_action_id = item.id + 1 }
         }
         if data.next_id != nil && data.next_id > next_action_id { next_action_id = data.next_id }
@@ -1519,7 +1542,7 @@ fn remember_actions(key, items, source, account_id, folder_id, message_id, subje
         // Only keep tasks assigned to this user and backed by an exact quote
         // from the open email. This rejects generic notices and model guesses.
         if assignee == "user" && title != "" && evidence != "" && source.search(evidence) >= 0 {
-            action_items.push({id: next_action_id key: key title: title deadline: deadline evidence: evidence status: "suggested" account: account_id folder: folder_id message: message_id subject: subject sender: sender})
+            action_items.push({id: next_action_id key: key title: title deadline: deadline due_date: normalize_deadline(deadline) evidence: evidence status: "suggested" account: account_id folder: folder_id message: message_id subject: subject sender: sender})
             next_action_id = next_action_id + 1
         }
     }
@@ -1549,7 +1572,55 @@ fn tracked_todo_count(){
 fn action_state_face(status){
     if status == "todo" { return say("todo_added") }
     if status == "done" { return say("todo_done") }
+    if status == "ignored" { return say("tab_ignored") }
     return ""
+}
+// Real dates for deadlines: "明天"/"tomorrow" and friends resolve against
+// today when the item is stored, so the list can tell overdue from pending.
+fn pad2(n){
+    let s = "" + n
+    if s.len() < 2 { s = "0" + s }
+    return s
+}
+fn stamp_of(epoch){
+    let t = local_time(epoch)
+    return "" + t.year + "-" + pad2(t.month) + "-" + pad2(t.day)
+}
+fn today_stamp(){ return stamp_of(time_now()) }
+fn stamp_key(s){
+    let p = s.split("-")
+    if p.len() != 3 { return -1 }
+    let y = round(p[0].trim().to_f64())
+    let m = round(p[1].trim().to_f64())
+    let d = round(p[2].trim().to_f64())
+    if !(y >= 2000) || !(y <= 2100) { return -1 }
+    if !(m >= 1) || !(m <= 12) { return -1 }
+    if !(d >= 1) || !(d <= 31) { return -1 }
+    return y * 10000 + m * 100 + d
+}
+fn iso_date_of(text){
+    let head = text.trim()
+    if head.search("T") > 0 { head = head.split("T")[0] }
+    if head.search(" ") > 0 { head = head.split(" ")[0] }
+    let p = head.split("-")
+    if p.len() != 3 { p = head.split("/") }
+    if p.len() != 3 { return "" }
+    let y = round(p[0].trim().to_f64())
+    let m = round(p[1].trim().to_f64())
+    let d = round(p[2].trim().to_f64())
+    if !(y >= 2000) || !(y <= 2100) { return "" }
+    if !(m >= 1) || !(m <= 12) { return "" }
+    if !(d >= 1) || !(d <= 31) { return "" }
+    return "" + y + "-" + pad2(m) + "-" + pad2(d)
+}
+fn normalize_deadline(text){
+    let t = text.trim()
+    if t == "" { return "" }
+    if t == "今天" || t == "today" || t == "Today" { return today_stamp() }
+    if t == "明天" || t == "tomorrow" || t == "Tomorrow" { return stamp_of(time_now() + 86400) }
+    if t == "后天" { return stamp_of(time_now() + 172800) }
+    if t == "大后天" { return stamp_of(time_now() + 259200) }
+    return iso_date_of(t)
 }
 fn refresh_todo_button(){
     let label = say("todos")
@@ -1623,7 +1694,7 @@ fn tool_add_todo(){
     }
     let account_id = ""
     if account != nil { account_id = account.id }
-    let item = {id: next_action_id key: "manual:" + next_action_id title: clip(title, 180) deadline: clip(deadline, 100) evidence: "Created from the user's request in AgentMail." status: "todo" account: account_id folder: folder.id message: message subject: subject sender: sender}
+    let item = {id: next_action_id key: "manual:" + next_action_id title: clip(title, 180) deadline: clip(deadline, 100) due_date: normalize_deadline(deadline) evidence: "Created from the user's request in AgentMail." status: "todo" account: account_id folder: folder.id message: message subject: subject sender: sender}
     action_items.push(item)
     next_action_id = next_action_id + 1
     save_todo_changes()
@@ -1642,8 +1713,8 @@ fn tool_update_todo(){
         if item.id == id && item.status != "ignored" {
             found = true
             if title != "" && title != item.title { item.title = clip(title, 180); changed = true }
-            if arg_todo_deadline_mode == "set" && deadline != item.deadline { item.deadline = clip(deadline, 100); changed = true }
-            if arg_todo_deadline_mode == "clear" && item.deadline != "" { item.deadline = ""; changed = true }
+            if arg_todo_deadline_mode == "set" && deadline != item.deadline { item.deadline = clip(deadline, 100); item.due_date = normalize_deadline(deadline); changed = true }
+            if arg_todo_deadline_mode == "clear" && item.deadline != "" { item.deadline = ""; item.due_date = ""; changed = true }
             shown = todo_line(item)
         }
     }
@@ -2350,7 +2421,7 @@ fn react_next(){
     react_step = react_step + 1
     ui.agent_note.set_text(say("thinking"))
     host.request("model.complete", {
-        task: "You are AgentMail in a ReAct loop. The language field is the system language. Write answer in that language. If the person's own later messages ask for a different language, write answer in that language instead. Write any email subject and body you put in subject and body in the same language as answer. Current screen: the value of screen. You can open the mail list, one message, the reply composer, or the new-message composer. tools is a comma-separated list run in order, or empty. Tools: read_message, read_mailbox, read_range, summarize, translate, show_original, find_event, add_event, list_todos, add_todo, update_todo, complete_todo, reopen_todo, delete_todo, open_reply, open_compose, write_reply, write_mail, open_mail, classify, classify_more. summarize also extracts unfinished action items assigned to the user and stores them beside the open email; mention those action items, including their ids, in the final answer when present. For a user request to remember, add, modify, complete, reopen, remove, or delete a personal to-do, use the to-do tools. Do not say AgentMail has no to-do feature and do not substitute a reminder email or calendar event. list_todos returns the ids and states of all active suggestions and to-dos. For a new to-do, call add_todo with todo_id 0 and a concise todo_title; put any user-stated deadline in todo_deadline. For a summary suggestion whose id is known, call add_todo with that todo_id to track it. For update_todo, complete_todo, reopen_todo, and delete_todo, use the exact todo_id; call list_todos first when the target is ambiguous. update_todo changes a non-empty todo_title and changes deadline only when todo_deadline_mode is set or clear; use keep otherwise. The user asking in this turn authorizes local to-do changes. classify sorts the latest 100 messages into the account's existing folders, and only when the user asks. classify_more does the next 100, and only when the user asks for more. Never classify on your own. find_event reads a schedule from the open mail. add_event writes the schedule already in the pending field, and only after the user has agreed in their own later message. When the question is Recognize, call summarize then find_event before Finish. If a schedule was found, the answer must show its title, start, end, and location, then ask whether to add it. Do not call add_event during Recognize. When the user agrees, call add_event. History is the earlier chat. Use it, and use pending, so you know which schedule they mean. For write_reply and write_mail put the draft in to, subject, and body. For open_mail put words from the subject or sender in query. since, until, and span are only for read_range. After you see an observation, you may return another list. Set stop to Finish or 结束 only when answer is the reply for the user. Do not put Finish inside answer."
+        task: "You are AgentMail in a ReAct loop. The language field is the system language. Write answer in that language. If the person's own later messages ask for a different language, write answer in that language instead. Write any email subject and body you put in subject and body in the same language as answer. Current screen: the value of screen. You can open the mail list, one message, the reply composer, or the new-message composer. tools is a comma-separated list run in order, or empty. Tools: read_message, read_mailbox, read_range, summarize, translate, show_original, find_event, add_event, list_todos, add_todo, update_todo, complete_todo, reopen_todo, delete_todo, open_reply, open_compose, write_reply, write_mail, open_mail, classify, classify_more. summarize also extracts unfinished action items assigned to the user and stores them beside the open email; mention those action items, including their ids, in the final answer when present. For a user request to remember, add, modify, complete, reopen, remove, or delete a personal to-do, use the to-do tools. Do not say AgentMail has no to-do feature and do not substitute a reminder email or calendar event. list_todos returns the ids and states of all active suggestions and to-dos. For a new to-do, call add_todo with todo_id 0 and a concise todo_title; put any user-stated deadline in todo_deadline. For a summary suggestion whose id is known, call add_todo with that todo_id to track it. For update_todo, complete_todo, reopen_todo, and delete_todo, use the exact todo_id; call list_todos first when the target is ambiguous. update_todo changes a non-empty todo_title and changes deadline only when todo_deadline_mode is set or clear; use keep otherwise. The user asking in this turn authorizes local to-do changes. classify sorts the latest 100 messages into the account's existing folders, and only when the user asks. classify_more does the next 100, and only when the user asks for more. Never classify on your own. find_event reads a schedule from the open mail. add_event writes the schedule already in the pending field, and only after the user has agreed in their own later message. When the question is Recognize, call summarize then find_event before Finish. If a schedule was found, the answer must show its title, start, end, and location, then ask whether to add it. Do not call add_event during Recognize. When the user agrees, call add_event. History is the earlier chat. Use it, and use pending, so you know which schedule they mean. For write_reply and write_mail put the draft in to, subject, and body. For open_mail put words from the subject or sender in query. since, until, and span are only for read_range. After you see an observation, you may return another list. Set stop to Finish or 结束 only when answer is the reply for the user. Do not put Finish inside answer. Today is " + today_stamp() + ". Write todo_deadline as a YYYY-MM-DD date computed from today whenever the user states a deadline."
         input: {question: pending_q screen: screen_now() open: open_hint() language: sys_lang history: clip(history_text(), 4000) pending: event_brief() observations: clip(react_trace, 6000) step: react_step}
         schema: plan_schema()
         class: "fast"
@@ -3018,37 +3089,63 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
             }
             todos_pane := SolidView{visible: false width: Fill height: Fill flow: Down new_batch: true draw_bg.color: #xffffff padding: Inset{left: 16 right: 16 top: 8 bottom: 16} spacing: 8
                 View{width: Fill height: Fit flow: Right align: Align{y: 0.5}
-                    btn_todos_back := Bar{text: "‹ 返回" on_click: || close_detail()}
+                    btn_todos_back := Bar{text: "‹ 返回" on_click: || todos_back()}
                     View{width: Fill height: 1}
+                    // Entries into the two archive categories; only the main
+                    // pending list shows them. Inside a category the top right
+                    // stays empty — the way back is the top-left 返回 button.
+                    todo_tabs := View{width: Fit height: Fit flow: Right spacing: 4 on_render: || {
+                        if todo_tab == "todo" {
+                            Bar{text: say("todo_done") on_click: || todo_tab_show("done")}
+                            Bar{text: say("tab_ignored") on_click: || todo_tab_show("ignored")}
+                        } else {
+                            // An empty on_render keeps the previous children, so
+                            // the archive pages draw a placeholder instead.
+                            View{width: 1 height: 1}
+                        }
+                    }}
                 }
                 todos_title := Label{text: "AgentMail 待办" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 26}}
                 todos_hint := Label{width: Fill text: "你从邮件中选择跟进的事项。" draw_text.color: secondary draw_text.text_style.font_size: 13}
-                todo_rows := ScrollYView{width: Fill height: Fill flow: Down spacing: 10 padding: Inset{top: 6 bottom: 20} on_render: || {
-                    if tracked_todo_count() == 0 {
-                        Label{width: Fill text: say("todo_empty") draw_text.color: secondary draw_text.text_style.font_size: 14}
+                todo_rows := ScrollYView{width: Fill height: Fill flow: Down spacing: 10 padding: Inset{top: 6 bottom: 20 right: 12} scroll_bars +: {scroll_bar_y +: {bar_size: 8.0 draw_bg +: {color: #x00000012 color_hover: #x00000038 color_drag: #x00000059 border_size: 0.0}}} on_render: || {
+                    let shown = 0
+                    for item in action_items { if item.status == todo_tab { shown = shown + 1 } }
+                    if shown == 0 {
+                        let empty_text = say("todo_empty")
+                        if todo_tab == "done" { empty_text = say("done_empty") }
+                        if todo_tab == "ignored" { empty_text = say("ignored_empty") }
+                        Label{width: Fill text: empty_text draw_text.color: secondary draw_text.text_style.font_size: 14}
                     }
                     for item in action_items {
-                        if item.status == "todo" || item.status == "done" {
+                        if item.status == todo_tab {
                             let action_id = item.id
                             let due_text = say("no_due")
-                            if item.deadline != "" { due_text = say("due") + item.deadline }
-                            SolidView{width: Fill height: Fit flow: Down padding: 12 spacing: 5 draw_bg +: {color: #xf2f2f7 border_radius: 10.0}
+                            let due_over = false
+                            if item.due_date != nil && item.due_date != "" {
+                                due_text = say("due") + item.due_date
+                                let due_key = stamp_key(item.due_date)
+                                if item.status == "todo" && due_key >= 0 && due_key <= stamp_key(today_stamp()) { due_over = true }
+                            } else if item.deadline != "" { due_text = say("due") + item.deadline }
+                            RoundedView{width: Fill height: Fit flow: Down padding: 12 spacing: 5 draw_bg +: {color: #xf2f2f7 border_radius: 10.0}
                                 View{width: Fill height: Fit flow: Right spacing: 8
                                     Label{width: Fill text: item.title draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 15}}
                                     Label{text: action_state_face(item.status) draw_text.color: secondary draw_text.text_style.font_size: 12}
                                 }
-                                Label{width: Fill text: due_text draw_text.color: secondary draw_text.text_style.font_size: 12}
+                                if due_over {
+                                    Label{width: Fill text: due_text draw_text.color: #xff3b30 draw_text.text_style: theme.font_bold{font_size: 12}}
+                                } else {
+                                    Label{width: Fill text: due_text draw_text.color: secondary draw_text.text_style.font_size: 12}
+                                }
                                 Label{width: Fill text: item.sender + " · " + item.subject max_lines: 2 draw_text.color: secondary draw_text.text_style.font_size: 12}
-                                Label{width: Fill text: say("evidence") + item.evidence max_lines: 3 draw_text.color: ink draw_text.text_style.font_size: 12}
                                 View{width: Fill height: Fit flow: Right spacing: 4
                                     if item.account != "" && item.message != "" {
                                         Bar{text: say("source") on_click: || open_action_source(action_id)}
                                     }
-                                    if item.status == "todo" {
+                                    if todo_tab == "todo" {
                                         Bar{text: say("complete") on_click: || set_action_status(action_id, "done")}
                                         Bar{text: say("ignore") on_click: || set_action_status(action_id, "ignored")}
                                     } else {
-                                        Bar{text: say("reopen") on_click: || set_action_status(action_id, "todo")}
+                                        Bar{text: say("re_add") on_click: || set_action_status(action_id, "todo")}
                                     }
                                 }
                             }
@@ -3087,13 +3184,22 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
                         if item.status != "ignored" {
                             let action_id = item.id
                             let due_text = say("no_due")
-                            if item.deadline != "" { due_text = say("due") + item.deadline }
-                            SolidView{width: Fill height: Fit flow: Down padding: 12 spacing: 5 draw_bg +: {color: #xf2f2f7 border_radius: 10.0}
+                            let due_over = false
+                            if item.due_date != nil && item.due_date != "" {
+                                due_text = say("due") + item.due_date
+                                let due_key = stamp_key(item.due_date)
+                                if item.status == "todo" && due_key >= 0 && due_key <= stamp_key(today_stamp()) { due_over = true }
+                            } else if item.deadline != "" { due_text = say("due") + item.deadline }
+                            RoundedView{width: Fill height: Fit flow: Down padding: 12 spacing: 5 draw_bg +: {color: #xf2f2f7 border_radius: 10.0}
                                 View{width: Fill height: Fit flow: Right spacing: 8
                                     Label{width: Fill text: item.title draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 14}}
                                     Label{text: action_state_face(item.status) draw_text.color: secondary draw_text.text_style.font_size: 12}
                                 }
-                                Label{width: Fill text: due_text draw_text.color: secondary draw_text.text_style.font_size: 12}
+                                if due_over {
+                                    Label{width: Fill text: due_text draw_text.color: #xff3b30 draw_text.text_style: theme.font_bold{font_size: 12}}
+                                } else {
+                                    Label{width: Fill text: due_text draw_text.color: secondary draw_text.text_style.font_size: 12}
+                                }
                                 Label{width: Fill text: say("evidence") + item.evidence max_lines: 3 draw_text.color: ink draw_text.text_style.font_size: 12}
                                 View{width: Fill height: Fit flow: Right spacing: 4
                                     Bar{text: say("source") on_click: || open_action_source(action_id)}
@@ -3234,10 +3340,12 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
                     trans_hint := Label{width: Fill text: "总结和翻译使用这个语言。如果邮件已经是这个语言，就保持原文。" draw_text.color: secondary draw_text.text_style.font_size: 12}
                 }
             }
-            draft_ask := GestureView{visible: false width: Fill height: Fill align: Align{x: 0.5 y: 0.5} on_tap: |x, y| { }
-                draw_bg.color: #x66000000
+            draft_ask := GestureView{visible: false width: Fill height: Fill flow: Overlay align: Align{x: 0.5 y: 0.5} on_tap: |x, y| { }
+                // GestureView paints no background; the dim is this SolidView.
+                // Colours are #RRGGBBAA — the dim black is #x00000066, not #x66000000.
+                SolidView{width: Fill height: Fill draw_bg.color: #x00000066}
                 GestureView{width: 340 height: Fit on_tap: |x, y| { }
-                    SolidView{width: Fill height: Fit flow: Down padding: 20 spacing: 12 draw_bg +: {color: #xffffff border_radius: 16.0}
+                    RoundedView{width: Fill height: Fit flow: Down padding: 20 spacing: 12 draw_bg +: {color: #xffffff border_radius: 16.0}
                         draft_title := Label{text: "" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 18}}
                         draft_body := Label{width: Fill text: "" draw_text.color: secondary draw_text.text_style.font_size: 14}
                         View{width: Fill height: Fit flow: Right
@@ -3251,10 +3359,12 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
                     }
                 }
             }
-            confirm := GestureView{visible: false width: Fill height: Fill align: Align{x: 0.5 y: 0.5} on_tap: |x, y| cancel_remove()
-                draw_bg.color: #x66000000
+            confirm := GestureView{visible: false width: Fill height: Fill flow: Overlay align: Align{x: 0.5 y: 0.5} on_tap: |x, y| cancel_remove()
+                // GestureView paints no background; the dim is this SolidView.
+                // Colours are #RRGGBBAA — the dim black is #x00000066, not #x66000000.
+                SolidView{width: Fill height: Fill draw_bg.color: #x00000066}
                 GestureView{width: 320 height: Fit on_tap: |x, y| { }
-                    SolidView{width: Fill height: Fit flow: Down padding: 20 spacing: 12 draw_bg +: {color: #xffffff border_radius: 16.0}
+                    RoundedView{width: Fill height: Fit flow: Down padding: 20 spacing: 12 draw_bg +: {color: #xffffff border_radius: 16.0}
                         confirm_title := Label{text: "移除这个账号？" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 18}}
                         confirm_name := Label{width: Fill text: "" draw_text.color: secondary draw_text.text_style.font_size: 14}
                         View{width: Fill height: Fit flow: Right
@@ -3294,17 +3404,17 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
                 }
                 View{width: Fill height: Fill flow: Overlay
                     agent_chat := View{width: Fill height: Fill flow: Down spacing: 8
-                chat_view := ScrollYView{width: Fill height: Fill flow: Down spacing: 10 on_render: || {
+                chat_view := ScrollYView{width: Fill height: Fill flow: Down spacing: 10 padding: Inset{right: 12} scroll_bars +: {scroll_bar_y +: {bar_size: 8.0 draw_bg +: {color: #x00000012 color_hover: #x00000038 color_drag: #x00000059 border_size: 0.0}}} on_render: || {
                     if chat_log.len() == 0 {
                         Label{width: Fill text: say("ask_hint") draw_text.color: secondary draw_text.text_style.font_size: 13}
                     }
                     for m in chat_log {
                         if m.role == "user" {
-                            SolidView{width: Fill height: Fit padding: Inset{left: 10 right: 10 top: 8 bottom: 8} show_bg: true draw_bg.color: #xd6e8ff draw_bg.border_radius: 12.0
+                            RoundedView{width: Fill height: Fit padding: Inset{left: 10 right: 10 top: 8 bottom: 8} show_bg: true draw_bg.color: #xd6e8ff draw_bg.border_radius: 12.0
                                 Label{width: Fill text: m.text draw_text.color: ink draw_text.wrap: Words draw_text.text_style: theme.font_bold{font_size: 14}}
                             }
                         } else {
-                            SolidView{width: Fill height: Fit padding: Inset{left: 10 right: 10 top: 8 bottom: 8} show_bg: true draw_bg.color: #xffffff draw_bg.border_radius: 12.0
+                            RoundedView{width: Fill height: Fit padding: Inset{left: 10 right: 10 top: 8 bottom: 8} show_bg: true draw_bg.color: #xffffff draw_bg.border_radius: 12.0
                                 Label{width: Fill text: m.text draw_text.color: ink draw_text.wrap: Words draw_text.text_style.font_size: 14}
                             }
                         }
