@@ -4,8 +4,7 @@
     "storage",
     "mail",
     "model",
-    "device_calendar",
-    "web"
+    "device_calendar"
   ],
   "compute": {
     "instruction_budget": null,
@@ -22,7 +21,7 @@
   },
   "id": "agent-mail",
   "integrity": {
-    "bundle_blake3": "3c3ee6b828f084f4970fa7e071ef096f1ba3642ed9f8507d19d146d32d8e254b"
+    "bundle_blake3": "1177b266c9264d0cdc35d6e4356533ad9171293b59bf8e195cdf9bb9c66e8e65"
   },
   "name": "AgentMail",
   "network": {
