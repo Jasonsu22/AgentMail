@@ -394,6 +394,9 @@ fn say(id){
     if id == "sub_no_new" { return at5(i, "No new readable mail in this selection. Refresh or change the selected senders/topics.", "所选范围没有尚未入期的可读邮件，可刷新或调整订阅源、关注主题。", "Aucun nouvel e-mail lisible dans cette sélection.", "対象の未処理メールがありません。更新または対象を変更してください。", "В выбранном диапазоне нет новых доступных писем.") }
     if id == "sub_choose" { return at5(i, "Select at least one sender first.", "请先选入至少一个订阅源。", "Choisissez au moins un expéditeur.", "送信者を1つ以上選んでください。", "Выберите хотя бы одного отправителя.") }
     if id == "sub_later" { return at5(i, "Read later", "稍后阅读", "Lire plus tard", "後で読む", "Прочитать позже") }
+    if id == "sub_add_later" { return at5(i, "Add to Read later", "加入稍后阅读", "Ajouter à Lire plus tard", "後で読むに追加", "Добавить в список на потом") }
+    if id == "sub_added_later" { return at5(i, "✓ Added to Read later", "✓ 已加入稍后阅读", "✓ Ajouté à Lire plus tard", "✓ 後で読むに追加済み", "✓ Добавлено в список на потом") }
+    if id == "sub_recommended_later" { return at5(i, "★ AI recommends reading later", "★ AI 推荐稍后阅读", "★ Recommandé par l’IA", "★ AI のおすすめ", "★ ИИ рекомендует прочитать позже") }
     if id == "sub_saved" { return at5(i, "Saved for later", "已存入稍后阅读", "Enregistré", "保存済み", "Сохранено") }
     if id == "sub_later_empty" { return at5(i, "Save articles from a briefing to read them later.", "可以在简报中保存值得稍后阅读的文章。", "Enregistrez des articles depuis une synthèse.", "ダイジェストから記事を保存できます。", "Сохраняйте статьи из сводок.") }
     if id == "sub_new" { return at5(i, "New", "新增", "Nouveau", "新規", "Новое") }
@@ -2635,6 +2638,11 @@ fn save_subscription_article(i){
     subscription_note = say("sub_saved")
     refresh_subscriptions()
 }
+fn subscription_article_saved(edition, item){
+    let key = edition.selection_key + "|" + item.title
+    for saved in subscription_later { if saved.key == key { return true } }
+    return false
+}
 fn latest_subscription_edition(){
     let wanted = subscription_signature(subscription_selected_ids())
     let chosen = nil
@@ -4222,8 +4230,9 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
                                     for link in item.links {
                                         LinkLabel{width: Fill text: link.url url: link.url draw_text.color: accent draw_text.text_style.font_size: 12}
                                     }
-                                    let later_label = say("sub_later")
-                                    if item.read_later { later_label = "★ " + later_label }
+                                    if item.read_later { Label{width: Fill text: say("sub_recommended_later") draw_text.color: secondary draw_text.text_style.font_size: 12} }
+                                    let later_label = say("sub_add_later")
+                                    if subscription_article_saved(edition, item) { later_label = say("sub_added_later") }
                                     Bar{text: later_label on_click: || save_subscription_article(i)}
                                 }
                             }
