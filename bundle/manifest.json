@@ -21,7 +21,7 @@
   },
   "id": "agent-mail",
   "integrity": {
-    "bundle_blake3": "ed08c909edcec9298336d8eca6665113f800fe75bfb79c856544ffc227582d6e"
+    "bundle_blake3": "069a97587de735fab89af055748e180873e63dfa6ae7b4171ace064ae04ddbd9"
   },
   "name": "AgentMail",
   "network": {

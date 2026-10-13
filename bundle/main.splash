@@ -438,6 +438,7 @@ fn say(id){
     if id == "check_attachment" { return at5(i, "Outgoing attachment status is unavailable. If you mention an attachment, verify it in the send review.", "无法读取待发送附件的真实状态；如提到附件，请在发送审阅时核对是否确实附上。", "L'état des pièces jointes sortantes est inconnu. Vérifiez-les avant l'envoi.", "送信する添付ファイルの状態は取得できません。送信確認画面でご確認ください。", "Статус исходящих вложений неизвестен. Проверьте их перед отправкой.") }
     if id == "check_keep" { return at5(i, "Keep current draft", "保留当前内容", "Garder le brouillon", "現在の内容を保持", "Оставить как есть") }
     if id == "check_again" { return at5(i, "Check again", "重新检查", "Revérifier", "再確認", "Проверить снова") }
+    if id == "check_fix_all" { return at5(i, "AI fix", "AI 修复", "Correction IA", "AI修正", "ИИ-исправление") }
     if id == "check_source" { return at5(i, "View original", "查看对应原文", "Voir l'original", "元メールを表示", "Показать оригинал") }
     if id == "check_fix" { return at5(i, "Correct this item", "修正这一项", "Corriger ce point", "この項目を修正", "Исправить этот пункт") }
     if id == "check_fill" { return at5(i, "Fill in this item", "补充这一项", "Compléter ce point", "この項目を補足", "Дополнить этот пункт") }
@@ -3719,8 +3720,8 @@ fn tool_open_mail(){
     })
 }
 fn close_mail_check(){
-    mail_check_token = mail_check_token + 1
-    mail_check_busy = false
+    // Hiding only: an in-flight check keeps running, so reopening the sheet
+    // never restarts it. A fresh request goes out only from 重新检查.
     ui.mail_check_sheet.set_visible(false)
 }
 fn mail_check_matches(){
@@ -3794,6 +3795,7 @@ fn finish_mail_check(token, r){
             if issues.len() > 0 && accepted == 0 { mail_check_note = say("bad_answer") }
         }
     }
+    paint_mail_check_actions()
     ui.mail_check_rows.render()
 }
 fn request_mail_check(token){
@@ -3801,6 +3803,7 @@ fn request_mail_check(token){
     if !mail_check_matches() {
         mail_check_busy = false
         mail_check_note = say("check_stale")
+        paint_mail_check_actions()
         ui.mail_check_rows.render()
         return
     }
@@ -3839,6 +3842,7 @@ fn begin_mail_check(){
     mail_check_issues = base_mail_check_issues()
     ui.mail_check_sheet.set_visible(true)
     ui.mail_check_rows.render()
+    paint_mail_check_actions()
     if reply_message == "" { request_mail_check(token); return }
     // Retrieve by the saved reply reference, including drafts reopened later;
     // the currently visible reader can belong to a completely different mail.
@@ -3847,6 +3851,61 @@ fn begin_mail_check(){
         receive_mail_check_original(token, r)
         request_mail_check(token)
     })
+}
+fn open_mail_check(){
+    if account == nil || !ui.composer.visible() { return }
+    if mail_check_snapshot != nil && mail_check_snapshot.generation == compose_generation {
+        // Same draft session: reopen the sheet, never send a second request.
+        ui.mail_check_sheet.set_visible(true)
+        ui.mail_check_rows.render()
+        return
+    }
+    begin_mail_check()
+}
+fn recheck_mail(){
+    // A new AI request is allowed only once the previous one has ended.
+    if mail_check_busy { return }
+    begin_mail_check()
+}
+fn paint_mail_check_actions(){
+    // The action row exists only once a result is in: 修复 when there are
+    // issues, 保留当前内容 when the check came back clean.
+    let ready = !mail_check_busy
+    ui.mail_check_actions.set_visible(ready)
+    if ready {
+        if mail_check_issues.len() > 0 { ui.mail_check_left.set_text(say("check_fix_all")) }
+        else { ui.mail_check_left.set_text(say("check_keep")) }
+    }
+}
+fn mail_check_left_tap(){
+    if mail_check_issues.len() > 0 { fix_all_mail_check(); return }
+    close_mail_check()
+}
+fn fix_all_mail_check(){
+    if mail_check_busy || !mail_check_matches() { return }
+    let applied = 0
+    for item in mail_check_issues {
+        if item.correction.trim() == "" { continue }
+        let value = ui.c_body.text()
+        if item.field == "subject" { value = ui.c_subject.text() }
+        if item.fix == "replace" && item.draft_quote != "" {
+            let parts = value.split(item.draft_quote)
+            if parts.len() != 2 { continue }
+            value = parts[0] + item.correction + parts[1]
+        } else if item.fix == "append" {
+            if item.field == "subject" && value.trim() != "" { continue }
+            if value.trim() != "" { value = value + "\n\n" }
+            value = value + item.correction
+        } else { continue }
+        if item.field == "subject" { ui.c_subject.set_text(value); applied = applied + 1 }
+        else if item.field == "body" { ui.c_body.set_text(value); applied = applied + 1 }
+    }
+    if applied == 0 { return }
+    touch_draft()
+    mail_check_note = say("check_applied")
+    mail_check_issues = []
+    paint_mail_check_actions()
+    mail_check_results()
 }
 fn view_mail_check_source(i){
     mail_check_selected = i
@@ -3888,6 +3947,7 @@ fn apply_mail_check_fix(){
     touch_draft()
     mail_check_note = say("check_applied")
     mail_check_issues = []
+    paint_mail_check_actions()
     mail_check_results()
 }
 fn open_draft_sheet(){
@@ -4422,7 +4482,7 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
             btn_cancel := Bar{text: "取消" on_click: || back_to_inbox()}
             View{width: Fill height: 1}
             btn_draft := Bar{text: "AI 帮写" on_click: || open_draft_sheet()}
-            btn_check_mail := Bar{text: "检查邮件" on_click: || begin_mail_check()}
+            btn_check_mail := Bar{text: "检查邮件" on_click: || open_mail_check()}
             btn_send := Bar{text: "发送" on_click: || send()}
         }
         cap_to := Label{text: "收件人" draw_text.color: secondary draw_text.text_style.font_size: 12}
@@ -4690,7 +4750,6 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
                     if mail_check_source_note != "" {
                         Label{width: Fill text: mail_check_source_note draw_text.color: secondary draw_text.text_style.font_size: 12}
                     }
-                    Label{width: Fill text: say("check_attachment") draw_text.color: secondary draw_text.text_style.font_size: 12}
                     if !mail_check_busy && !mail_check_matches() {
                         Label{width: Fill text: say("check_stale") draw_text.color: #xffff9500 draw_text.text_style.font_size: 13}
                     }
@@ -4739,10 +4798,10 @@ SolidView{width: Fill height: Fill flow: Overlay draw_bg.color: #xffffff
                         }
                     }
                 }}
-                View{width: Fill height: Fit flow: Right
-                    Bar{text: say("check_keep") on_click: || close_mail_check()}
+                mail_check_actions := View{visible: false width: Fill height: Fit flow: Right
+                    mail_check_left := Bar{text: "" on_click: || mail_check_left_tap()}
                     View{width: Fill height: 1}
-                    Bar{text: say("check_again") on_click: || begin_mail_check()}
+                    Bar{text: say("check_again") on_click: || recheck_mail()}
                 }
             }
         }
