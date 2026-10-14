@@ -1,7 +1,7 @@
 # AgentMail 隐私说明
 
-发布者：AAA养鸡场  
-应用标识：`agent-mail`  
+发布者：AAA养鸡场
+应用标识：`agent-mail`
 联系与问题：https://github.com/Jasonsu22/AgentMail
 
 AgentMail 是运行在 OctoSense 里的邮件应用。它不单独建立账号系统，也不在应用里收集密码或 API 密钥。
